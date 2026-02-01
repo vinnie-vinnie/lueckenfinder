@@ -1,0 +1,820 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lückenfinder v6.1 (Interactive)</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <style>
+
+        /* --- BASIC STYLING & LAYOUT --- */
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            height: 95vh;
+        }
+
+        h1 {
+            margin: 0 0 0 0;
+            text-align: left;
+            font-weight: normal;
+            font-size: 2.5rem;
+            color: #333;
+        }
+
+
+        /* Container for the main content (TextBox + Map) */
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 10px;
+            flex-grow: 1; /* Fills remaining height */
+        }
+
+        .container-top {
+            display: flex;
+            flex-direction: row;
+            justify-content: flex-end;
+            align-items: flex-start;
+            gap: 20px; /* Abstand zwischen den Toggles */
+            margin-bottom: 10px;
+        }
+
+
+        /* --- LEFT COLUMN: CONTROLS (unverändert) --- */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            width: 300px;
+            flex-shrink: 0;
+        }
+
+        textarea {
+            width: 100%;
+            flex-grow: 1;
+            border: 2px solid #e9571b;
+            border-radius: 10px;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            resize: none;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .action-btn {
+            margin-bottom: 10px;
+            background-color: #e9571b;
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            text-align: center;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+            .action-btn:hover {
+                background-color: #c04512;
+            }
+
+
+        /* --- RIGHT COLUMN: MAP & OVERLAY --- */
+        .map-wrapper {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+
+        /* Custom Toggle Switch (unverändert) */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+            margin-left: 10px;
+        }
+
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 16px;
+                width: 16px;
+                left: 2px;
+                bottom: 2px;
+                background-color: white;
+                transition: .4s;
+                border-radius: 50%;
+            }
+
+        input:checked + .slider {
+            background-color: #e9571b;
+        }
+
+            input:checked + .slider:before {
+                transform: translateX(20px);
+            }
+
+
+        /* The Map Box */
+        #map {
+            width: 100%;
+            height: 100%; /* Matches textbox height via flex container */
+            border: 2px solid #e9571b;
+            border-radius: 10px;
+            position: relative; /* Wichtig für das Overlay */
+        }
+
+
+        /* Einwohnerzahlen Overlay Styling */
+        #populationOverlay {
+            position: absolute;
+            bottom: 10px; /* Abstand vom oberen Rand der Karte */
+            left: 10px; /* Abstand vom linken Rand der Karte */
+            right: 10px; /* Abstand vom rechten Rand der Karte */
+            background-color: white;
+            border: 2px solid #e9571b;
+            border-radius: 10px;
+            padding: 10px 15px;
+            z-index: 1000; /* Stellt sicher, dass es über der Karte liegt */
+            display: none; /* Standardmäßig versteckt */
+            font-size: 14px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: opacity 0.3s ease-in-out;
+        }
+
+            #populationOverlay.visible {
+                display: block;
+            }
+
+            #populationOverlay div {
+                margin-right: 20px;
+                display: inline-block;
+            }
+
+
+        /* CSS Hack to make the specific WMS layer grayscale (unverändert) */
+        .grayscale-layer {
+            filter: grayscale(100%);
+        }
+        
+        /* Interaktiver Modus - Tooltips */
+        .plz-tooltip {
+            background-color: rgba(51, 51, 51, 0.9) !important;
+            border: none !important;
+            border-radius: 5px !important;
+            color: white !important;
+            font-weight: bold !important;
+            font-size: 12px !important;
+            padding: 5px 10px !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Lückenfinder v6.1 (Interactive Map)</h1>
+    <div class="container-top">
+
+        <div class="toggle-container">
+            <label for="interactiveToggle">Interaktiver Modus 🖱️</label>
+            <label class="switch">
+                <input type="checkbox" id="interactiveToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="toggle-container">
+            <label for="popToggle">Population</label>
+            <label class="switch">
+                <input type="checkbox" id="popToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="toggle-container">
+            <label for="topoToggle">Ortschaftenverzeichnis</label>
+            <label class="switch">
+                <input type="checkbox" id="topoToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+
+    <div class="container">
+        <div class="controls">
+            <button class="action-btn" id="findBtn">Lücken finden ➡️</button>
+            <textarea id="plzInput" placeholder="Postleitzahlen eingeben (3097, 3098-3100, ...)"></textarea>
+        </div>
+
+        <div class="map-wrapper">
+            <div id="populationOverlay">
+            </div>
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <script>
+        // ============================================
+        // GLOBALE VARIABLEN
+        // ============================================
+        
+        // Einwohnerdaten (PLZ-Code als Schlüssel)
+        let populationData = {};
+        
+        // Lokale PLZ-Geometrien (PLZ-Code als Schlüssel)
+        let plzGeometries = {};
+        let geometriesLoaded = false;
+        
+        
+        // ============================================
+        // 1. LOKALE PLZ-GEOMETRIEN LADEN
+        // ============================================
+        
+        /**
+         * Lädt die lokale GeoJSON-Datei mit allen PLZ-Geometrien.
+         * Diese Funktion wird einmalig beim Laden der Seite aufgerufen.
+         */
+        async function loadLocalPlzGeometries() {
+            try {
+                console.log('🔄 Lade lokale PLZ-Geometrien...');
+                const response = await fetch('plz_geometries.geojson');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const geojsonData = await response.json();
+                
+                // Index nach PLZ für schnellen Zugriff
+                geojsonData.features.forEach(feature => {
+                    const plz = feature.properties.PLZ;
+                    if (plz) {
+                        // Speichere das komplette Feature für späteren Gebrauch
+                        plzGeometries[plz] = feature;
+                    }
+                });
+                
+                geometriesLoaded = true;
+                console.log(`✅ ${Object.keys(plzGeometries).length} PLZ-Geometrien geladen`);
+                
+                // Button aktivieren
+                document.getElementById('findBtn').disabled = false;
+                document.getElementById('findBtn').textContent = 'Lücken finden ➡️';
+                
+            } catch (error) {
+                console.error('❌ Fehler beim Laden der PLZ-Geometrien:', error);
+                alert('Fehler: plz_geometries.geojson konnte nicht geladen werden.\n\n' +
+                      'Stelle sicher, dass die Datei im gleichen Verzeichnis wie diese HTML-Datei liegt.\n\n' +
+                      'Siehe convert_swissboundaries.py um die Datei zu erstellen.');
+                document.getElementById('findBtn').textContent = '❌ Geodaten fehlen';
+            }
+        }
+        
+        /**
+         * Holt PLZ-Daten aus dem lokalen Index (ersetzt fetchPlzData API-Anfrage).
+         * @param {string[]} plzArray - Array von 4-stelligen PLZ-Strings.
+         * @returns {Object[]} Array von Datensatzobjekten im gleichen Format wie die API.
+         */
+        function getLocalPlzData(plzArray) {
+            return plzArray
+                .filter(plz => plzGeometries[plz]) // Nur PLZs die existieren
+                .map(plz => {
+                    const feature = plzGeometries[plz];
+                    // Konvertiere zu dem Format, das drawPlzPolygon erwartet
+                    return {
+                        fields: {
+                            plz_code: plz,
+                            plz_name: feature.properties.PLZ_NAME || '',
+                            geo_shape: feature.geometry
+                        }
+                    };
+                });
+        }
+        
+        
+        // ============================================
+        // 2. EINWOHNERDATEN LADEN
+        // ============================================
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+
+            for (let i = 1; i < lines.length; i++) {
+                const columns = lines[i].split(';'); // Mit Semikolon trennen
+                if (columns.length < 25) continue;
+
+                const plz = columns[0].trim();
+
+                const parseNum = (colIndex) => {
+                    return parseInt(columns[colIndex].trim().replace(/\s/g, '')) || 0;
+                };
+
+                const total = parseNum(1); // Spalte B
+
+                if (plz.length === 4) {
+                    populationData[plz] = {
+                        total: total,
+                        '0-15': parseNum(6) + parseNum(7) + parseNum(8),
+                        '15-30': parseNum(9) + parseNum(10) + parseNum(11),
+                        '30-45': parseNum(12) + parseNum(13) + parseNum(14),
+                        '45-60': parseNum(15) + parseNum(16) + parseNum(17),
+                        '60-75': parseNum(18) + parseNum(19) + parseNum(20),
+                        '>75': parseNum(21) + parseNum(22) + parseNum(23) + parseNum(24)
+                    };
+                }
+            }
+        }
+
+        async function loadPopulationData() {
+            try {
+                const response = await fetch('Population2024.csv');
+                if (!response.ok) {
+                    console.error('Fehler beim Laden der CSV-Datei. Stellen Sie sicher, dass "Population2024.csv" vorhanden ist.');
+                    return;
+                }
+                const csvText = await response.text();
+                parseCSV(csvText);
+                console.log('✅ Einwohnerdaten erfolgreich geladen.');
+            } catch (error) {
+                console.error('❌ Ladefehler Einwohnerdaten:', error);
+            }
+        }
+
+        // Lade beide Datenquellen beim Start
+        loadPopulationData();
+        loadLocalPlzGeometries();
+
+        function updatePopulationOverlay(data) {
+            const overlay = document.getElementById('populationOverlay');
+            const formatter = new Intl.NumberFormat('de-CH');
+
+            let content = `
+                                    <div><b>Totale Population:</b> ${formatter.format(data.total)}</div>
+                                    <div> / / / </div>
+                                    <div><b>0-15:</b> ${formatter.format(data['0-15'])}</div>
+                                    <div><b>15-30:</b> ${formatter.format(data['15-30'])}</div>
+                                    <div><b>30-45:</b> ${formatter.format(data['30-45'])}</div>
+                                    <div><b>45-60:</b> ${formatter.format(data['45-60'])}</div>
+                                    <div><b>60-75:</b> ${formatter.format(data['60-75'])}</div>
+                                    <div><b>>75:</b> ${formatter.format(data['>75'])}</div>
+                                `;
+
+            overlay.innerHTML = content;
+        }
+
+        
+        // ============================================
+        // 3. KARTE INITIALISIEREN
+        // ============================================
+        
+        const map = L.map('map').setView([46.8182, 8.2275], 8);
+
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        const topoLayer = L.tileLayer.wms('https://wms.geo.admin.ch/', {
+            layers: 'ch.swisstopo-vd.ortschaftenverzeichnis_plz',
+            format: 'image/png',
+            transparent: true,
+            opacity: 0.8,
+            attribution: '© swisstopo',
+            className: 'grayscale-layer'
+        });
+
+        
+        // ============================================
+        // 4. TOGGLE LOGIK
+        // ============================================
+
+        const topoToggleInput = document.getElementById('topoToggle');
+        topoToggleInput.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                topoLayer.addTo(map);
+            } else {
+                map.removeLayer(topoLayer);
+            }
+        });
+
+        const popToggleInput = document.getElementById('popToggle');
+        const popOverlay = document.getElementById('populationOverlay');
+        popToggleInput.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                popOverlay.classList.add('visible');
+            } else {
+                popOverlay.classList.remove('visible');
+            }
+        });
+
+        // Interaktiver Modus Toggle
+        let interactiveMode = false;
+        let interactiveLayer = L.layerGroup().addTo(map);
+        
+        const interactiveToggleInput = document.getElementById('interactiveToggle');
+        interactiveToggleInput.addEventListener('change', (e) => {
+            interactiveMode = e.target.checked;
+            
+            if (interactiveMode) {
+                // Aktiviere interaktiven Modus
+                console.log('🖱️ Interaktiver Modus aktiviert - Klicke auf PLZ-Bereiche zum Hinzufügen');
+                map.getContainer().style.cursor = 'crosshair';
+                enableInteractiveMode();
+            } else {
+                // Deaktiviere interaktiven Modus
+                console.log('🖱️ Interaktiver Modus deaktiviert');
+                map.getContainer().style.cursor = '';
+                disableInteractiveMode();
+            }
+        });
+
+        
+        // ============================================
+        // 4a. INTERAKTIVER MODUS
+        // ============================================
+        
+        let selectedPlzSet = new Set(); // Speichert ausgewählte PLZs
+        let interactiveLayers = {}; // Speichert Layer-Referenzen pro PLZ
+        
+        function enableInteractiveMode() {
+            // Lade alle PLZ-Geometrien als klickbare Layer
+            Object.keys(plzGeometries).forEach(plz => {
+                const feature = plzGeometries[plz];
+                
+                const interactiveStyle = {
+                    color: "#333",
+                    weight: 1,
+                    fillColor: "#fff",
+                    fillOpacity: 0,
+                    className: 'interactive-plz-layer'
+                };
+                
+                const selectedStyle = {
+                    color: "#e9571b",
+                    weight: 2,
+                    fillColor: "#e9571b",
+                    fillOpacity: 0.4
+                };
+                
+                const geoJsonFeature = {
+                    type: "Feature",
+                    properties: {
+                        plz: plz,
+                        name: feature.properties.PLZ_NAME || ''
+                    },
+                    geometry: feature.geometry
+                };
+                
+                const layer = L.geoJSON(geoJsonFeature, {
+                    style: interactiveStyle,
+                    onEachFeature: function (feature, layer) {
+                        // Tooltip
+                        layer.bindTooltip(`PLZ: ${feature.properties.plz}`, {
+                            permanent: false,
+                            direction: 'center',
+                            className: 'plz-tooltip'
+                        });
+                        
+                        // Click Handler
+                        layer.on('click', function(e) {
+                            if (interactiveMode) {
+                                L.DomEvent.stopPropagation(e);
+                                togglePlzSelection(feature.properties.plz, layer);
+                            }
+                        });
+                        
+                        // Hover Effect
+                        layer.on('mouseover', function() {
+                            if (interactiveMode && !selectedPlzSet.has(feature.properties.plz)) {
+                                layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
+                            }
+                        });
+                        
+                        layer.on('mouseout', function() {
+                            if (interactiveMode && !selectedPlzSet.has(feature.properties.plz)) {
+                                layer.setStyle({fillOpacity: 0});
+                            }
+                        });
+                    }
+                });
+                
+                interactiveLayers[plz] = layer;
+                interactiveLayer.addLayer(layer);
+            });
+        }
+        
+        function disableInteractiveMode() {
+            // Entferne alle interaktiven Layer
+            interactiveLayer.clearLayers();
+            interactiveLayers = {};
+        }
+        
+        function togglePlzSelection(plz, layer) {
+            if (selectedPlzSet.has(plz)) {
+                // Deselect
+                selectedPlzSet.delete(plz);
+                layer.setStyle({
+                    fillOpacity: 0,
+                    fillColor: "#fff",
+                    color: "#333",
+                    weight: 1
+                });
+            } else {
+                // Select
+                selectedPlzSet.add(plz);
+                layer.setStyle({
+                    fillOpacity: 0.4,
+                    fillColor: "#e9571b",
+                    color: "#e9571b",
+                    weight: 2
+                });
+            }
+            
+            // Update Textfeld
+            updateTextFieldFromSelection();
+        }
+        
+        function updateTextFieldFromSelection() {
+            // Sortiere PLZs
+            const sortedPlzs = Array.from(selectedPlzSet).sort();
+            
+            // Kombiniere zu Ranges wo möglich
+            const plzString = formatPlzListToRanges(sortedPlzs);
+            
+            // Update Textfeld
+            textBox.value = plzString;
+            
+            console.log(`📝 ${sortedPlzs.length} PLZs ausgewählt: ${plzString}`);
+        }
+        
+        function formatPlzListToRanges(plzList) {
+            if (plzList.length === 0) return '';
+            
+            const numbers = plzList.map(p => parseInt(p)).sort((a, b) => a - b);
+            const ranges = [];
+            let rangeStart = numbers[0];
+            let rangeEnd = numbers[0];
+            
+            for (let i = 1; i < numbers.length; i++) {
+                if (numbers[i] === rangeEnd + 1) {
+                    // Fortlaufend
+                    rangeEnd = numbers[i];
+                } else {
+                    // Lücke gefunden - speichere vorherigen Range
+                    if (rangeStart === rangeEnd) {
+                        ranges.push(String(rangeStart).padStart(4, '0'));
+                    } else if (rangeEnd === rangeStart + 1) {
+                        // Nur 2 Nummern - einzeln aufführen
+                        ranges.push(String(rangeStart).padStart(4, '0'));
+                        ranges.push(String(rangeEnd).padStart(4, '0'));
+                    } else {
+                        // Range
+                        ranges.push(`${String(rangeStart).padStart(4, '0')}-${String(rangeEnd).padStart(4, '0')}`);
+                    }
+                    rangeStart = numbers[i];
+                    rangeEnd = numbers[i];
+                }
+            }
+            
+            // Letzten Range hinzufügen
+            if (rangeStart === rangeEnd) {
+                ranges.push(String(rangeStart).padStart(4, '0'));
+            } else if (rangeEnd === rangeStart + 1) {
+                ranges.push(String(rangeStart).padStart(4, '0'));
+                ranges.push(String(rangeEnd).padStart(4, '0'));
+            } else {
+                ranges.push(`${String(rangeStart).padStart(4, '0')}-${String(rangeEnd).padStart(4, '0')}`);
+            }
+            
+            return ranges.join(', ');
+        }
+
+        
+        // ============================================
+        // 5. PLZ-REGIONEN ZEICHNEN
+        // ============================================
+
+        let plzLayerGroup = L.layerGroup().addTo(map);
+
+        const highlightStyle = {
+            color: "#e9571b",
+            weight: 2,
+            fillColor: "#e9571b",
+            fillOpacity: 0.6
+        };
+
+        function drawPlzPolygon(record) {
+            const plz = record.fields.plz_code;
+            const geoShape = record.fields.geo_shape;
+            if (geoShape) {
+                const geoJsonFeature = {
+                    type: "Feature",
+                    properties: {
+                        plz: plz,
+                        name: record.fields.plz_name
+                    },
+                    geometry: geoShape
+                };
+                const layer = L.geoJSON(geoJsonFeature, {
+                    style: highlightStyle,
+                    onEachFeature: function (feature, layer) {
+                        layer.bindPopup(`<b>PLZ: ${feature.properties.plz}</b><br>${feature.properties.name}`);
+                    }
+                });
+                plzLayerGroup.addLayer(layer);
+                return layer;
+            }
+            return null;
+        }
+
+        
+        // ============================================
+        // 6. HAUPT-LOGIK: LÜCKEN FINDEN
+        // ============================================
+
+        const btn = document.getElementById('findBtn');
+        const textBox = document.getElementById('plzInput');
+        
+        // Button initial deaktivieren bis Geodaten geladen sind
+        btn.disabled = true;
+        btn.textContent = '⏳ Lade Geodaten...';
+
+        function expandPlzRange(rangeString) {
+            const parts = rangeString.split('-');
+            if (parts.length === 2) {
+                const startPlzStr = parts[0].trim();
+                const endPlzStr = parts[1].trim();
+                const startPlz = parseInt(startPlzStr);
+                const endPlz = parseInt(endPlzStr);
+
+                if (startPlzStr.length === 4 && endPlzStr.length === 4 && !isNaN(startPlz) && !isNaN(endPlz) && startPlz <= endPlz) {
+                    const result = [];
+                    for (let i = startPlz; i <= endPlz; i++) {
+                        result.push(String(i).padStart(4, '0'));
+                    }
+                    return result;
+                }
+            }
+            return [rangeString];
+        }
+
+
+        btn.addEventListener('click', async () => {
+            
+            if (!geometriesLoaded) {
+                alert('Geodaten werden noch geladen, bitte warten...');
+                return;
+            }
+            
+            // 1. Clear existing layers
+            plzLayerGroup.clearLayers();
+
+            // 2. Parse Input and expand ranges
+            const rawText = textBox.value;
+
+            const components = rawText.split(/[\s,;]+/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            let allPlz = [];
+
+            components.forEach(component => {
+                if (component.includes('-')) {
+                    const expanded = expandPlzRange(component);
+                    expanded.forEach(plz => allPlz.push(plz));
+                } else if (component.length === 4 && /^\d{4}$/.test(component)) {
+                    allPlz.push(component);
+                }
+            });
+
+            // Duplikate entfernen und auf gültige 4-stellige PLZs filtern
+            const uniquePlzSet = new Set(allPlz.filter(plz => plz.length === 4));
+            const cleanNumbers = Array.from(uniquePlzSet);
+
+            if (cleanNumbers.length === 0) {
+                updatePopulationOverlay({
+                    total: 0, '0-15': 0, '15-30': 0, '30-45': 0, '45-60': 0, '60-75': 0, '>75': 0
+                });
+                console.log("Keine gültigen 4-stelligen PLZs eingegeben.");
+                return;
+            }
+
+            // 3. GEÄNDERT: Verwende lokale Geodaten statt API
+            // Kein Batching mehr nötig - alle Daten sind bereits lokal!
+            const allRecords = getLocalPlzData(cleanNumbers);
+            
+            console.log(`📍 ${allRecords.length} von ${cleanNumbers.length} PLZs gefunden`);
+            
+            // Zeige Warnung für nicht gefundene PLZs
+            const foundPlzs = new Set(allRecords.map(r => r.fields.plz_code));
+            const missingPlzs = cleanNumbers.filter(plz => !foundPlzs.has(plz));
+            if (missingPlzs.length > 0) {
+                console.warn('⚠️ Folgende PLZs wurden nicht gefunden:', missingPlzs.join(', '));
+            }
+
+
+            let bounds = L.latLngBounds([]);
+            let foundLayers = [];
+
+            // 4. Initialisiere Summierungsobjekt für die Altersgruppen
+            let totalSums = {
+                total: 0,
+                '0-15': 0,
+                '15-30': 0,
+                '30-45': 0,
+                '45-60': 0,
+                '60-75': 0,
+                '>75': 0
+            };
+
+            // 5. Draw polygons & Sum population data
+            allRecords.forEach(record => {
+                const plz = record.fields.plz_code;
+                const layer = drawPlzPolygon(record);
+
+                if (layer) {
+                    foundLayers.push(layer);
+                    bounds.extend(layer.getBounds());
+                }
+
+                // Summiere Einwohnerzahlen
+                if (populationData[plz]) {
+                    totalSums.total += populationData[plz].total;
+                    totalSums['0-15'] += populationData[plz]['0-15'];
+                    totalSums['15-30'] += populationData[plz]['15-30'];
+                    totalSums['30-45'] += populationData[plz]['30-45'];
+                    totalSums['45-60'] += populationData[plz]['45-60'];
+                    totalSums['60-75'] += populationData[plz]['60-75'];
+                    totalSums['>75'] += populationData[plz]['>75'];
+                }
+            });
+
+            // 6. Fit map to show all found regions
+            if (foundLayers.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            } else {
+                alert("Keine Ortschaften gefunden für die eingegebenen PLZs.");
+            }
+
+            // 7. Update the population overlay
+            updatePopulationOverlay(totalSums);
+        });
+
+        
+        // ============================================
+        // 7. TASTENKOMBINATION
+        // ============================================
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault();
+                    document.getElementById('findBtn').click();
+                }
+            }
+        });
+    </script>
+</body>
+</html>

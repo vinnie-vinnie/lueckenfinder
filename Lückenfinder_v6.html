@@ -174,7 +174,6 @@
             border: 2px solid #e9571b;
             border-radius: 10px;
             position: relative;
-            cursor: crosshair; /* Immer Crosshair für interaktiven Modus */
         }
 
 
@@ -210,14 +209,29 @@
             filter: grayscale(100%);
         }
 
-        /* Leaflet Popup/Tooltip Entfernen - kein Rechteck mehr! */
+        /* Leaflet Popup entfernen - aber Tooltips behalten! */
         .leaflet-popup-pane {
             display: none !important;
         }
         
-        /* Tooltip komplett ausblenden */
-        .leaflet-tooltip-pane {
-            display: none !important;
+        /* Tooltips für PLZ-Anzeige */
+        .leaflet-tooltip {
+            background-color: rgba(51, 51, 51, 0.95) !important;
+            border: none !important;
+            border-radius: 6px !important;
+            color: white !important;
+            font-weight: bold !important;
+            font-size: 13px !important;
+            padding: 6px 10px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+            pointer-events: none !important;
+        }
+        
+        .leaflet-tooltip-top:before,
+        .leaflet-tooltip-bottom:before,
+        .leaflet-tooltip-left:before,
+        .leaflet-tooltip-right:before {
+            border: none !important;
         }
         
     </style>
@@ -275,10 +289,13 @@
         let plzGeometries = {};
         let geometriesLoaded = false;
         
+        // Ortschaftsnamen (PLZ als Schlüssel, Array von Namen als Wert)
+        let localityNames = {};
+        
         // Ausgewählte PLZs
         let selectedPlzSet = new Set();
         
-        // Layer-Referenzen
+        // Layer-Referenzen (PLZ → Array von Layern, da eine PLZ mehrere Regionen haben kann!)
         let interactiveLayers = {};
         
         // Minimiert/Maximiert Status
@@ -300,16 +317,21 @@
                 
                 const geojsonData = await response.json();
                 
-                // Index nach PLZ für schnellen Zugriff
+                // Index nach PLZ - WICHTIG: Kann mehrere Features pro PLZ geben!
                 geojsonData.features.forEach(feature => {
                     const plz = feature.properties.PLZ;
                     if (plz) {
-                        plzGeometries[plz] = feature;
+                        // Initialisiere Array falls noch nicht vorhanden
+                        if (!plzGeometries[plz]) {
+                            plzGeometries[plz] = [];
+                        }
+                        // Füge Feature zum Array hinzu
+                        plzGeometries[plz].push(feature);
                     }
                 });
                 
                 geometriesLoaded = true;
-                console.log(`✅ ${Object.keys(plzGeometries).length} PLZ-Geometrien geladen`);
+                console.log(`✅ ${Object.keys(plzGeometries).length} PLZ-Codes geladen (${geojsonData.features.length} Regionen total)`);
                 
                 // Interaktiven Modus aktivieren
                 enableInteractiveMode();
@@ -318,6 +340,55 @@
                 console.error('❌ Fehler beim Laden der PLZ-Geometrien:', error);
                 alert('Fehler: plz_geometries.geojson konnte nicht geladen werden.\n\n' +
                       'Stelle sicher, dass die Datei im gleichen Verzeichnis liegt.');
+            }
+        }
+        
+        
+        // ============================================
+        // 1a. ORTSCHAFTSNAMEN LADEN
+        // ============================================
+        
+        async function loadLocalityNames() {
+            try {
+                console.log('🔄 Lade Ortschaftsnamen...');
+                const response = await fetch('Ortschaften.csv');
+                
+                if (!response.ok) {
+                    console.warn('⚠️ Ortschaften.csv nicht gefunden - Ortschaftsnamen werden nicht angezeigt');
+                    return;
+                }
+                
+                const csvText = await response.text();
+                parseLocalityCSV(csvText);
+                
+                console.log(`✅ ${Object.keys(localityNames).length} Ortschaftsnamen geladen`);
+                
+            } catch (error) {
+                console.warn('⚠️ Fehler beim Laden der Ortschaftsnamen:', error);
+            }
+        }
+        
+        function parseLocalityCSV(csvText) {
+            const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+            
+            // Erste Zeile überspringen (Header)
+            for (let i = 1; i < lines.length; i++) {
+                const columns = lines[i].split(';');
+                
+                if (columns.length < 2) continue;
+                
+                const ortschaftsname = columns[0].trim();
+                const plz = columns[1].trim();
+                
+                if (plz.length === 4 && ortschaftsname) {
+                    // Mehrere Ortschaften können die gleiche PLZ haben!
+                    if (!localityNames[plz]) {
+                        localityNames[plz] = [];
+                    }
+                    if (!localityNames[plz].includes(ortschaftsname)) {
+                        localityNames[plz].push(ortschaftsname);
+                    }
+                }
             }
         }
         
@@ -371,6 +442,7 @@
         }
 
         loadPopulationData();
+        loadLocalityNames();
         loadLocalPlzGeometries();
 
         function updatePopulationOverlay(data) {
@@ -447,8 +519,14 @@
         function enableInteractiveMode() {
             console.log('🖱️ Interaktiver Modus aktiviert');
             
+            // Iteriere über alle PLZs
             Object.keys(plzGeometries).forEach(plz => {
-                const feature = plzGeometries[plz];
+                const features = plzGeometries[plz]; // Array von Features für diese PLZ!
+                
+                // Initialisiere Layer-Array für diese PLZ
+                if (!interactiveLayers[plz]) {
+                    interactiveLayers[plz] = [];
+                }
                 
                 const normalStyle = {
                     color: "#333",
@@ -464,62 +542,93 @@
                     fillOpacity: 0.4
                 };
                 
-                const geoJsonFeature = {
-                    type: "Feature",
-                    properties: {
-                        plz: plz,
-                        name: feature.properties.PLZ_NAME || ''
-                    },
-                    geometry: feature.geometry
-                };
-                
-                const layer = L.geoJSON(geoJsonFeature, {
-                    style: normalStyle,
-                    onEachFeature: function (feature, layer) {
-                        // Click Handler
-                        layer.on('click', function(e) {
-                            L.DomEvent.stopPropagation(e);
-                            togglePlzSelection(feature.properties.plz, layer);
-                        });
-                        
-                        // Hover Effect (nur visuell, keine Tooltips!)
-                        layer.on('mouseover', function() {
-                            if (!selectedPlzSet.has(feature.properties.plz)) {
-                                layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
-                            }
-                        });
-                        
-                        layer.on('mouseout', function() {
-                            if (!selectedPlzSet.has(feature.properties.plz)) {
-                                layer.setStyle({fillOpacity: 0});
-                            }
-                        });
-                    }
+                // Erstelle Layer für jede Region dieser PLZ
+                features.forEach((feature, idx) => {
+                    const geoJsonFeature = {
+                        type: "Feature",
+                        properties: {
+                            plz: plz,
+                            name: feature.properties.PLZ_NAME || ''
+                        },
+                        geometry: feature.geometry
+                    };
+                    
+                    const layer = L.geoJSON(geoJsonFeature, {
+                        style: normalStyle,
+                        onEachFeature: function (feature, layer) {
+                            // Tooltip mit PLZ und Ortschaftsnamen
+                            const tooltipText = getTooltipText(feature.properties.plz);
+                            layer.bindTooltip(tooltipText, {
+                                permanent: false,
+                                direction: 'center',
+                                opacity: 0.95
+                            });
+                            
+                            // Click Handler
+                            layer.on('click', function(e) {
+                                L.DomEvent.stopPropagation(e);
+                                togglePlzSelection(feature.properties.plz);
+                            });
+                            
+                            // Hover Effect
+                            layer.on('mouseover', function() {
+                                if (!selectedPlzSet.has(feature.properties.plz)) {
+                                    layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
+                                }
+                            });
+                            
+                            layer.on('mouseout', function() {
+                                if (!selectedPlzSet.has(feature.properties.plz)) {
+                                    layer.setStyle({fillOpacity: 0});
+                                }
+                            });
+                        }
+                    });
+                    
+                    // Füge Layer zum Array hinzu
+                    interactiveLayers[plz].push(layer);
+                    interactiveLayer.addLayer(layer);
                 });
-                
-                interactiveLayers[plz] = layer;
-                interactiveLayer.addLayer(layer);
             });
         }
         
-        function togglePlzSelection(plz, layer) {
+        function getTooltipText(plz) {
+            // PLZ + Ortschaftsnamen
+            let text = `<b>${plz}</b>`;
+            
+            if (localityNames[plz] && localityNames[plz].length > 0) {
+                text += `<br>${localityNames[plz].join(', ')}`;
+            }
+            
+            return text;
+        }
+        
+        function togglePlzSelection(plz) {
+            // Alle Layer für diese PLZ holen
+            const layers = interactiveLayers[plz];
+            if (!layers) return;
+            
             if (selectedPlzSet.has(plz)) {
-                // Deselect
+                // Deselect - alle Regionen dieser PLZ
                 selectedPlzSet.delete(plz);
-                layer.setStyle({
-                    fillOpacity: 0,
-                    fillColor: "#fff",
-                    color: "#333",
-                    weight: 1
+                layers.forEach(layer => {
+                    layer.setStyle({
+                        fillOpacity: 0,
+                        fillColor: "#fff",
+                        color: "#333",
+                        weight: 1
+                    });
                 });
             } else {
-                // Select
+                // Select - alle Regionen dieser PLZ
                 selectedPlzSet.add(plz);
-                layer.setStyle({
-                    fillOpacity: 0.4,
-                    fillColor: "#e9571b",
-                    color: "#e9571b",
-                    weight: 2
+                layers.forEach(layer => {
+                    layer.setStyle({
+                        fillOpacity: 0.4,
+                        fillColor: "#e9571b",
+                        color: "#e9571b",
+                        weight: 2
+                    });
                 });
             }
             
@@ -585,22 +694,29 @@
             selectedPlzSet.clear();
             parsedPlzs.forEach(plz => selectedPlzSet.add(plz));
             
-            // Update Map Highlighting
+            // Update Map Highlighting - ALLE Regionen pro PLZ!
             Object.keys(interactiveLayers).forEach(plz => {
-                const layer = interactiveLayers[plz];
+                const layers = interactiveLayers[plz]; // Array von Layern!
+                
                 if (selectedPlzSet.has(plz)) {
-                    layer.setStyle({
-                        fillOpacity: 0.4,
-                        fillColor: "#e9571b",
-                        color: "#e9571b",
-                        weight: 2
+                    // Highlight alle Regionen dieser PLZ
+                    layers.forEach(layer => {
+                        layer.setStyle({
+                            fillOpacity: 0.4,
+                            fillColor: "#e9571b",
+                            color: "#e9571b",
+                            weight: 2
+                        });
                     });
                 } else {
-                    layer.setStyle({
-                        fillOpacity: 0,
-                        fillColor: "#fff",
-                        color: "#333",
-                        weight: 1
+                    // Unhighlight alle Regionen dieser PLZ
+                    layers.forEach(layer => {
+                        layer.setStyle({
+                            fillOpacity: 0,
+                            fillColor: "#fff",
+                            color: "#333",
+                            weight: 1
+                        });
                     });
                 }
             });
@@ -690,7 +806,16 @@
         }
         
         function formatPlzListExpanded(plzList) {
-            return plzList.map(p => String(p).padStart(4, '0')).sort().join(', ');
+            return plzList.map(plz => {
+                const plzStr = String(plz).padStart(4, '0');
+                
+                // Füge Ortschaftsnamen hinzu wenn vorhanden
+                if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
+                    return `${plzStr} (${localityNames[plzStr].join(', ')})`;
+                }
+                
+                return plzStr;
+            }).sort().join(', ');
         }
         
         

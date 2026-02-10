@@ -209,12 +209,16 @@
             filter: grayscale(100%);
         }
 
-        /* Leaflet Popup entfernen - aber Tooltips behalten! */
-        .leaflet-popup-pane {
+        /* Leaflet Popup UND Pane komplett entfernen */
+        .leaflet-popup,
+        .leaflet-popup-pane,
+        .leaflet-popup-content-wrapper,
+        .leaflet-popup-tip-container {
             display: none !important;
+            visibility: hidden !important;
         }
         
-        /* Tooltips für PLZ-Anzeige */
+        /* Tooltips für PLZ-Anzeige - aber NUR beim Hover! */
         .leaflet-tooltip {
             background-color: rgba(51, 51, 51, 0.95) !important;
             border: none !important;
@@ -227,11 +231,22 @@
             pointer-events: none !important;
         }
         
+        /* Tooltip-Pfeile entfernen */
         .leaflet-tooltip-top:before,
         .leaflet-tooltip-bottom:before,
         .leaflet-tooltip-left:before,
         .leaflet-tooltip-right:before {
-            border: none !important;
+            display: none !important;
+        }
+        
+        /* Leaflet Grabbing Cursor Fix */
+        .leaflet-grab {
+            cursor: grab !important;
+        }
+        
+        .leaflet-grabbing,
+        .leaflet-grabbing .leaflet-interactive {
+            cursor: grabbing !important;
         }
         
     </style>
@@ -262,9 +277,10 @@
         <div class="controls">
             <textarea id="plzInput" placeholder="Postleitzahlen eingeben oder auf Karte klicken..."></textarea>
             <div class="textarea-buttons">
-                <button class="textarea-btn" id="minimBtn" title="Format optimieren / expandieren">Minim</button>
+                <button class="textarea-btn" id="minimBtn" title="Mit/Ohne Ortschaftsnamen">Mit Name</button>
                 <button class="textarea-btn" id="copyBtn" title="Alle PLZs einzeln kopieren">Ctrl+C</button>
                 <button class="textarea-btn" id="sqlBtn" title="SQL-Query für Cobra CRM">SQL</button>
+                <button class="textarea-btn" id="clearBtn" title="Alles löschen">Clear</button>
             </div>
         </div>
 
@@ -474,6 +490,26 @@
             maxZoom: 19,
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
+        
+        // Event-Listener um Tooltips beim Dragging zu schließen
+        map.on('dragstart', function() {
+            map.closePopup();
+            // Schließe alle Tooltips
+            map.eachLayer(function(layer) {
+                if (layer.closeTooltip) {
+                    layer.closeTooltip();
+                }
+            });
+        });
+        
+        map.on('zoomstart', function() {
+            // Auch beim Zoom Tooltips schließen
+            map.eachLayer(function(layer) {
+                if (layer.closeTooltip) {
+                    layer.closeTooltip();
+                }
+            });
+        });
 
         const topoLayer = L.tileLayer.wms('https://wms.geo.admin.ch/', {
             layers: 'ch.swisstopo-vd.ortschaftenverzeichnis_plz',
@@ -558,29 +594,41 @@
                         onEachFeature: function (feature, layer) {
                             // Tooltip mit PLZ und Ortschaftsnamen
                             const tooltipText = getTooltipText(feature.properties.plz);
-                            layer.bindTooltip(tooltipText, {
+                            const tooltip = layer.bindTooltip(tooltipText, {
                                 permanent: false,
                                 direction: 'center',
-                                opacity: 0.95
+                                opacity: 0.95,
+                                sticky: false  // Wichtig: Tooltip folgt nicht der Maus
                             });
                             
                             // Click Handler
                             layer.on('click', function(e) {
                                 L.DomEvent.stopPropagation(e);
+                                // Tooltip schließen beim Klicken
+                                layer.closeTooltip();
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
                             // Hover Effect
-                            layer.on('mouseover', function() {
+                            layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
                                 }
+                                // Tooltip explizit öffnen
+                                layer.openTooltip(e.latlng);
                             });
                             
                             layer.on('mouseout', function() {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0});
                                 }
+                                // Tooltip explizit schließen
+                                layer.closeTooltip();
+                            });
+                            
+                            // Zusätzlich: Bei mousedown (Start vom Drag) Tooltip schließen
+                            layer.on('mousedown', function() {
+                                layer.closeTooltip();
                             });
                         }
                     });
@@ -823,20 +871,23 @@
         // 8. BUTTON FUNKTIONEN
         // ============================================
         
-        // MINIM Button - Toggle zwischen minimiert und expandiert
-        document.getElementById('minimBtn').addEventListener('click', () => {
+        // MINIM Button - Toggle zwischen mit/ohne Namen
+        const minimBtn = document.getElementById('minimBtn');
+        minimBtn.addEventListener('click', () => {
             const sortedPlzs = Array.from(selectedPlzSet).sort();
             
             if (isMinimized) {
-                // Expandieren
+                // Expandieren MIT Namen
                 textBox.value = formatPlzListExpanded(sortedPlzs);
                 isMinimized = false;
-                console.log('📋 Format: Expandiert');
+                minimBtn.textContent = 'Ohne Name';
+                console.log('📋 Format: Expandiert mit Namen');
             } else {
-                // Minimieren
+                // Minimieren OHNE Namen
                 textBox.value = formatPlzListToRanges(sortedPlzs);
                 isMinimized = true;
-                console.log('📋 Format: Minimiert');
+                minimBtn.textContent = 'Mit Name';
+                console.log('📋 Format: Minimiert ohne Namen');
             }
         });
         
@@ -907,6 +958,37 @@
                 console.error('Fehler beim Kopieren:', err);
                 alert('Kopieren fehlgeschlagen:\n\n' + sqlQuery);
             }
+        });
+        
+        // CLEAR Button - Alles löschen
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            // Lösche alle Auswahlen
+            selectedPlzSet.clear();
+            
+            // Lösche Textfeld
+            textBox.value = '';
+            
+            // Unhighlight alle Regionen auf der Karte
+            Object.keys(interactiveLayers).forEach(plz => {
+                const layers = interactiveLayers[plz];
+                layers.forEach(layer => {
+                    layer.setStyle({
+                        fillOpacity: 0,
+                        fillColor: "#fff",
+                        color: "#333",
+                        weight: 1
+                    });
+                });
+            });
+            
+            // Update Population (auf 0)
+            updatePopulationFromSelection();
+            
+            // Button-Text zurücksetzen
+            minimBtn.textContent = 'Mit Name';
+            isMinimized = true;
+            
+            console.log('🗑️ Alle Auswahlen gelöscht');
         });
         
         

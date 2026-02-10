@@ -33,7 +33,7 @@
             display: flex;
             flex-direction: row;
             gap: 10px;
-            flex-grow: 1; /* Fills remaining height */
+            flex-grow: 1;
         }
 
         .container-top {
@@ -61,7 +61,7 @@
             border: 2px solid #e9571b;
             border-radius: 10px;
             padding: 10px;
-            padding-bottom: 45px; /* Platz für Buttons */
+            padding-bottom: 45px;
             font-family: Arial, sans-serif;
             font-size: 14px;
             resize: none;
@@ -69,7 +69,6 @@
             outline: none;
         }
 
-        /* Button Container am unteren Rand des Textfelds */
         .textarea-buttons {
             position: absolute;
             bottom: 10px;
@@ -209,44 +208,34 @@
             filter: grayscale(100%);
         }
 
-        /* Leaflet Popup UND Pane komplett entfernen */
+        /* ALLE Leaflet Popups und Tooltips komplett deaktivieren! */
         .leaflet-popup,
         .leaflet-popup-pane,
         .leaflet-popup-content-wrapper,
-        .leaflet-popup-tip-container {
+        .leaflet-popup-tip-container,
+        .leaflet-popup-tip,
+        .leaflet-tooltip,
+        .leaflet-tooltip-pane {
             display: none !important;
             visibility: hidden !important;
-        }
-        
-        /* Tooltips für PLZ-Anzeige - aber NUR beim Hover! */
-        .leaflet-tooltip {
-            background-color: rgba(51, 51, 51, 0.95) !important;
-            border: none !important;
-            border-radius: 6px !important;
-            color: white !important;
-            font-weight: bold !important;
-            font-size: 13px !important;
-            padding: 6px 10px !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+            opacity: 0 !important;
             pointer-events: none !important;
         }
         
-        /* Tooltip-Pfeile entfernen */
-        .leaflet-tooltip-top:before,
-        .leaflet-tooltip-bottom:before,
-        .leaflet-tooltip-left:before,
-        .leaflet-tooltip-right:before {
-            display: none !important;
-        }
-        
-        /* Leaflet Grabbing Cursor Fix */
-        .leaflet-grab {
-            cursor: grab !important;
-        }
-        
-        .leaflet-grabbing,
-        .leaflet-grabbing .leaflet-interactive {
-            cursor: grabbing !important;
+        /* Custom Tooltip - komplett selbst gemacht! */
+        #customTooltip {
+            position: absolute;
+            background-color: rgba(51, 51, 51, 0.95);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            white-space: nowrap;
         }
         
     </style>
@@ -255,6 +244,14 @@
 
     <h1>Lückenfinder v6</h1>
     <div class="container-top">
+
+        <div class="toggle-container">
+            <label for="transportToggle">Straßennetz</label>
+            <label class="switch">
+                <input type="checkbox" id="transportToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
 
         <div class="toggle-container">
             <label for="popToggle">Population</label>
@@ -285,9 +282,10 @@
         </div>
 
         <div class="map-wrapper">
-            <div id="populationOverlay">
-            </div>
+            <div id="populationOverlay"></div>
             <div id="map"></div>
+            <!-- Custom Tooltip -->
+            <div id="customTooltip"></div>
         </div>
     </div>
 
@@ -298,24 +296,17 @@
         // GLOBALE VARIABLEN
         // ============================================
         
-        // Einwohnerdaten (PLZ-Code als Schlüssel)
         let populationData = {};
-        
-        // Lokale PLZ-Geometrien (PLZ-Code als Schlüssel)
         let plzGeometries = {};
         let geometriesLoaded = false;
-        
-        // Ortschaftsnamen (PLZ als Schlüssel, Array von Namen als Wert)
         let localityNames = {};
-        
-        // Ausgewählte PLZs
         let selectedPlzSet = new Set();
-        
-        // Layer-Referenzen (PLZ → Array von Layern, da eine PLZ mehrere Regionen haben kann!)
         let interactiveLayers = {};
-        
-        // Minimiert/Maximiert Status
         let isMinimized = true;
+        
+        // Custom Tooltip
+        const customTooltip = document.getElementById('customTooltip');
+        let currentHoverPlz = null;
         
         
         // ============================================
@@ -333,15 +324,12 @@
                 
                 const geojsonData = await response.json();
                 
-                // Index nach PLZ - WICHTIG: Kann mehrere Features pro PLZ geben!
                 geojsonData.features.forEach(feature => {
                     const plz = feature.properties.PLZ;
                     if (plz) {
-                        // Initialisiere Array falls noch nicht vorhanden
                         if (!plzGeometries[plz]) {
                             plzGeometries[plz] = [];
                         }
-                        // Füge Feature zum Array hinzu
                         plzGeometries[plz].push(feature);
                     }
                 });
@@ -349,13 +337,11 @@
                 geometriesLoaded = true;
                 console.log(`✅ ${Object.keys(plzGeometries).length} PLZ-Codes geladen (${geojsonData.features.length} Regionen total)`);
                 
-                // Interaktiven Modus aktivieren
                 enableInteractiveMode();
                 
             } catch (error) {
                 console.error('❌ Fehler beim Laden der PLZ-Geometrien:', error);
-                alert('Fehler: plz_geometries.geojson konnte nicht geladen werden.\n\n' +
-                      'Stelle sicher, dass die Datei im gleichen Verzeichnis liegt.');
+                alert('Fehler: plz_geometries.geojson konnte nicht geladen werden.');
             }
         }
         
@@ -370,7 +356,7 @@
                 const response = await fetch('Ortschaften.csv');
                 
                 if (!response.ok) {
-                    console.warn('⚠️ Ortschaften.csv nicht gefunden - Ortschaftsnamen werden nicht angezeigt');
+                    console.warn('⚠️ Ortschaften.csv nicht gefunden');
                     return;
                 }
                 
@@ -387,7 +373,6 @@
         function parseLocalityCSV(csvText) {
             const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
             
-            // Erste Zeile überspringen (Header)
             for (let i = 1; i < lines.length; i++) {
                 const columns = lines[i].split(';');
                 
@@ -397,7 +382,6 @@
                 const plz = columns[1].trim();
                 
                 if (plz.length === 4 && ortschaftsname) {
-                    // Mehrere Ortschaften können die gleiche PLZ haben!
                     if (!localityNames[plz]) {
                         localityNames[plz] = [];
                     }
@@ -486,31 +470,18 @@
         
         const map = L.map('map').setView([46.8182, 8.2275], 8);
 
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
         
-        // Event-Listener um Tooltips beim Dragging zu schließen
-        map.on('dragstart', function() {
-            map.closePopup();
-            // Schließe alle Tooltips
-            map.eachLayer(function(layer) {
-                if (layer.closeTooltip) {
-                    layer.closeTooltip();
-                }
-            });
+        // Transport Layer - OpenStreetMap Humanitarian (zeigt Straßen gut)
+        const transportLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors, Tiles courtesy of Humanitarian OpenStreetMap Team'
         });
         
-        map.on('zoomstart', function() {
-            // Auch beim Zoom Tooltips schließen
-            map.eachLayer(function(layer) {
-                if (layer.closeTooltip) {
-                    layer.closeTooltip();
-                }
-            });
-        });
-
+        // Topo Layer
         const topoLayer = L.tileLayer.wms('https://wms.geo.admin.ch/', {
             layers: 'ch.swisstopo-vd.ortschaftenverzeichnis_plz',
             format: 'image/png',
@@ -519,11 +490,33 @@
             attribution: '© swisstopo',
             className: 'grayscale-layer'
         });
+        
+        // Event-Listener um Custom Tooltip beim Dragging zu schließen
+        map.on('dragstart', function() {
+            hideCustomTooltip();
+        });
+        
+        map.on('zoomstart', function() {
+            hideCustomTooltip();
+        });
+        
+        map.on('click', function() {
+            hideCustomTooltip();
+        });
 
         
         // ============================================
         // 4. TOGGLE LOGIK
         // ============================================
+        
+        const transportToggleInput = document.getElementById('transportToggle');
+        transportToggleInput.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                transportLayer.addTo(map);
+            } else {
+                map.removeLayer(transportLayer);
+            }
+        });
 
         const topoToggleInput = document.getElementById('topoToggle');
         topoToggleInput.addEventListener('change', (e) => {
@@ -547,7 +540,38 @@
 
         
         // ============================================
-        // 5. INTERAKTIVER MODUS (IMMER AKTIV!)
+        // 5. CUSTOM TOOLTIP FUNKTIONEN
+        // ============================================
+        
+        function showCustomTooltip(plz, x, y) {
+            let text = `<b>${plz}</b>`;
+            
+            if (localityNames[plz] && localityNames[plz].length > 0) {
+                text += `<br>${localityNames[plz].join(', ')}`;
+            }
+            
+            customTooltip.innerHTML = text;
+            customTooltip.style.left = (x + 15) + 'px';
+            customTooltip.style.top = (y - 10) + 'px';
+            customTooltip.style.display = 'block';
+            currentHoverPlz = plz;
+        }
+        
+        function hideCustomTooltip() {
+            customTooltip.style.display = 'none';
+            currentHoverPlz = null;
+        }
+        
+        function updateCustomTooltip(x, y) {
+            if (customTooltip.style.display === 'block') {
+                customTooltip.style.left = (x + 15) + 'px';
+                customTooltip.style.top = (y - 10) + 'px';
+            }
+        }
+        
+        
+        // ============================================
+        // 6. INTERAKTIVER MODUS (IMMER AKTIV!)
         // ============================================
         
         let interactiveLayer = L.layerGroup().addTo(map);
@@ -555,11 +579,9 @@
         function enableInteractiveMode() {
             console.log('🖱️ Interaktiver Modus aktiviert');
             
-            // Iteriere über alle PLZs
             Object.keys(plzGeometries).forEach(plz => {
-                const features = plzGeometries[plz]; // Array von Features für diese PLZ!
+                const features = plzGeometries[plz];
                 
-                // Initialisiere Layer-Array für diese PLZ
                 if (!interactiveLayers[plz]) {
                     interactiveLayers[plz] = [];
                 }
@@ -578,7 +600,6 @@
                     fillOpacity: 0.4
                 };
                 
-                // Erstelle Layer für jede Region dieser PLZ
                 features.forEach((feature, idx) => {
                     const geoJsonFeature = {
                         type: "Feature",
@@ -592,72 +613,49 @@
                     const layer = L.geoJSON(geoJsonFeature, {
                         style: normalStyle,
                         onEachFeature: function (feature, layer) {
-                            // Tooltip mit PLZ und Ortschaftsnamen
-                            const tooltipText = getTooltipText(feature.properties.plz);
-                            const tooltip = layer.bindTooltip(tooltipText, {
-                                permanent: false,
-                                direction: 'center',
-                                opacity: 0.95,
-                                sticky: false  // Wichtig: Tooltip folgt nicht der Maus
-                            });
-                            
                             // Click Handler
                             layer.on('click', function(e) {
                                 L.DomEvent.stopPropagation(e);
-                                // Tooltip schließen beim Klicken
-                                layer.closeTooltip();
+                                hideCustomTooltip();
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
-                            // Hover Effect
+                            // Hover Effect + Custom Tooltip
                             layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
                                 }
-                                // Tooltip explizit öffnen
-                                layer.openTooltip(e.latlng);
+                                showCustomTooltip(feature.properties.plz, e.originalEvent.pageX, e.originalEvent.pageY);
+                            });
+                            
+                            layer.on('mousemove', function(e) {
+                                updateCustomTooltip(e.originalEvent.pageX, e.originalEvent.pageY);
                             });
                             
                             layer.on('mouseout', function() {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0});
                                 }
-                                // Tooltip explizit schließen
-                                layer.closeTooltip();
+                                hideCustomTooltip();
                             });
                             
-                            // Zusätzlich: Bei mousedown (Start vom Drag) Tooltip schließen
                             layer.on('mousedown', function() {
-                                layer.closeTooltip();
+                                hideCustomTooltip();
                             });
                         }
                     });
                     
-                    // Füge Layer zum Array hinzu
                     interactiveLayers[plz].push(layer);
                     interactiveLayer.addLayer(layer);
                 });
             });
         }
         
-        function getTooltipText(plz) {
-            // PLZ + Ortschaftsnamen
-            let text = `<b>${plz}</b>`;
-            
-            if (localityNames[plz] && localityNames[plz].length > 0) {
-                text += `<br>${localityNames[plz].join(', ')}`;
-            }
-            
-            return text;
-        }
-        
         function togglePlzSelection(plz) {
-            // Alle Layer für diese PLZ holen
             const layers = interactiveLayers[plz];
             if (!layers) return;
             
             if (selectedPlzSet.has(plz)) {
-                // Deselect - alle Regionen dieser PLZ
                 selectedPlzSet.delete(plz);
                 layers.forEach(layer => {
                     layer.setStyle({
@@ -668,7 +666,6 @@
                     });
                 });
             } else {
-                // Select - alle Regionen dieser PLZ
                 selectedPlzSet.add(plz);
                 layers.forEach(layer => {
                     layer.setStyle({
@@ -720,34 +717,30 @@
         
         
         // ============================================
-        // 6. TEXTFELD MONITORING (Live-Update!)
+        // 7. TEXTFELD MONITORING (Live-Update!)
         // ============================================
         
         const textBox = document.getElementById('plzInput');
         
-        // Debounce um nicht bei jedem Tastendruck zu updaten
         let textUpdateTimeout;
         textBox.addEventListener('input', () => {
             clearTimeout(textUpdateTimeout);
             textUpdateTimeout = setTimeout(() => {
                 updateSelectionFromTextField();
-            }, 300); // 300ms Verzögerung
+            }, 300);
         });
         
         function updateSelectionFromTextField() {
             const rawText = textBox.value;
             const parsedPlzs = parsePlzInput(rawText);
             
-            // Synchronisiere selectedPlzSet mit Input
             selectedPlzSet.clear();
             parsedPlzs.forEach(plz => selectedPlzSet.add(plz));
             
-            // Update Map Highlighting - ALLE Regionen pro PLZ!
             Object.keys(interactiveLayers).forEach(plz => {
-                const layers = interactiveLayers[plz]; // Array von Layern!
+                const layers = interactiveLayers[plz];
                 
                 if (selectedPlzSet.has(plz)) {
-                    // Highlight alle Regionen dieser PLZ
                     layers.forEach(layer => {
                         layer.setStyle({
                             fillOpacity: 0.4,
@@ -757,7 +750,6 @@
                         });
                     });
                 } else {
-                    // Unhighlight alle Regionen dieser PLZ
                     layers.forEach(layer => {
                         layer.setStyle({
                             fillOpacity: 0,
@@ -769,7 +761,6 @@
                 }
             });
             
-            // Update Population
             updatePopulationFromSelection();
         }
         
@@ -813,7 +804,7 @@
         
         
         // ============================================
-        // 7. FORMAT-FUNKTIONEN
+        // 8. FORMAT-FUNKTIONEN
         // ============================================
         
         function formatPlzListToRanges(plzList) {
@@ -857,9 +848,9 @@
             return plzList.map(plz => {
                 const plzStr = String(plz).padStart(4, '0');
                 
-                // Füge Ortschaftsnamen hinzu wenn vorhanden
+                // Ortschaftsnamen OHNE Klammern!
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
-                    return `${plzStr} (${localityNames[plzStr].join(', ')})`;
+                    return `${plzStr} ${localityNames[plzStr].join(', ')}`;
                 }
                 
                 return plzStr;
@@ -868,22 +859,19 @@
         
         
         // ============================================
-        // 8. BUTTON FUNKTIONEN
+        // 9. BUTTON FUNKTIONEN
         // ============================================
         
-        // MINIM Button - Toggle zwischen mit/ohne Namen
         const minimBtn = document.getElementById('minimBtn');
         minimBtn.addEventListener('click', () => {
             const sortedPlzs = Array.from(selectedPlzSet).sort();
             
             if (isMinimized) {
-                // Expandieren MIT Namen
                 textBox.value = formatPlzListExpanded(sortedPlzs);
                 isMinimized = false;
                 minimBtn.textContent = 'Ohne Name';
                 console.log('📋 Format: Expandiert mit Namen');
             } else {
-                // Minimieren OHNE Namen
                 textBox.value = formatPlzListToRanges(sortedPlzs);
                 isMinimized = true;
                 minimBtn.textContent = 'Mit Name';
@@ -891,7 +879,6 @@
             }
         });
         
-        // CTRL+C Button - Alle PLZs einzeln kopieren
         document.getElementById('copyBtn').addEventListener('click', async () => {
             const sortedPlzs = Array.from(selectedPlzSet).sort();
             const plzText = sortedPlzs.map(p => String(p).padStart(4, '0')).join(', ');
@@ -900,7 +887,6 @@
                 await navigator.clipboard.writeText(plzText);
                 console.log('📋 Kopiert:', plzText);
                 
-                // Visuelles Feedback
                 const btn = document.getElementById('copyBtn');
                 const originalText = btn.textContent;
                 btn.textContent = '✓';
@@ -909,15 +895,13 @@
                 }, 1000);
             } catch (err) {
                 console.error('Fehler beim Kopieren:', err);
-                alert('Kopieren fehlgeschlagen. Bitte manuell kopieren.');
+                alert('Kopieren fehlgeschlagen.');
             }
         });
         
-        // SQL Button - SQL-Query für Cobra CRM
         document.getElementById('sqlBtn').addEventListener('click', async () => {
             const sortedPlzs = Array.from(selectedPlzSet).sort().map(p => parseInt(p));
             
-            // SQL-Bedingungen erstellen
             const conditions = [];
             let i = 0;
             
@@ -925,13 +909,11 @@
                 let rangeStart = sortedPlzs[i];
                 let rangeEnd = sortedPlzs[i];
                 
-                // Finde zusammenhängende Bereiche
                 while (i + 1 < sortedPlzs.length && sortedPlzs[i + 1] === sortedPlzs[i] + 1) {
                     i++;
                     rangeEnd = sortedPlzs[i];
                 }
                 
-                // Erstelle SQL-Bedingung
                 if (rangeStart === rangeEnd) {
                     conditions.push(`ZIP0 = ${rangeStart}`);
                 } else {
@@ -947,7 +929,6 @@
                 await navigator.clipboard.writeText(sqlQuery);
                 console.log('📋 SQL kopiert:', sqlQuery);
                 
-                // Visuelles Feedback
                 const btn = document.getElementById('sqlBtn');
                 const originalText = btn.textContent;
                 btn.textContent = '✓';
@@ -960,15 +941,10 @@
             }
         });
         
-        // CLEAR Button - Alles löschen
         document.getElementById('clearBtn').addEventListener('click', () => {
-            // Lösche alle Auswahlen
             selectedPlzSet.clear();
-            
-            // Lösche Textfeld
             textBox.value = '';
             
-            // Unhighlight alle Regionen auf der Karte
             Object.keys(interactiveLayers).forEach(plz => {
                 const layers = interactiveLayers[plz];
                 layers.forEach(layer => {
@@ -981,10 +957,8 @@
                 });
             });
             
-            // Update Population (auf 0)
             updatePopulationFromSelection();
             
-            // Button-Text zurücksetzen
             minimBtn.textContent = 'Mit Name';
             isMinimized = true;
             
@@ -993,11 +967,10 @@
         
         
         // ============================================
-        // 9. TASTENKOMBINATIONEN
+        // 10. TASTENKOMBINATIONEN
         // ============================================
 
         document.addEventListener('keydown', function (event) {
-            // Ctrl/Cmd + Enter für "Minimieren"
             if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
                 document.getElementById('minimBtn').click();

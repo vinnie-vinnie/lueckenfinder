@@ -236,6 +236,7 @@
             z-index: 10000;
             display: none;
             white-space: nowrap;
+            transform: translate(10px, -30px); /* Leicht rechts und über dem Cursor */
         }
         
     </style>
@@ -475,11 +476,106 @@
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
         
-        // Transport Layer - OpenStreetMap Humanitarian (zeigt Straßen gut)
-        const transportLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors, Tiles courtesy of Humanitarian OpenStreetMap Team'
-        });
+        // Straßen-Layer mit Overpass API
+        let roadsLayer = L.layerGroup();
+        let roadsLoaded = false;
+        let currentRoadsQuery = null;
+        
+        // Funktion um Straßen zu laden
+        async function loadRoads() {
+            const bounds = map.getBounds();
+            const south = Math.max(bounds.getSouth(), 45.8);  // Schweiz Süd-Grenze
+            const north = Math.min(bounds.getNorth(), 47.9);  // Schweiz Nord-Grenze
+            const west = Math.max(bounds.getWest(), 5.9);     // Schweiz West-Grenze
+            const east = Math.min(bounds.getEast(), 10.6);    // Schweiz Ost-Grenze
+            
+            const bbox = `${south},${west},${north},${east}`;
+            
+            // Overpass Query für wichtige Straßen
+            const query = `
+                [out:json][timeout:25];
+                (
+                  way["highway"="motorway"](${bbox});
+                  way["highway"="trunk"](${bbox});
+                  way["highway"="primary"](${bbox});
+                  way["highway"="secondary"](${bbox});
+                  way["highway"="motorway_link"](${bbox});
+                  way["highway"="trunk_link"](${bbox});
+                );
+                out geom;
+            `;
+            
+            try {
+                console.log('🛣️ Lade Straßen für Bereich:', bbox);
+                const response = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    body: 'data=' + encodeURIComponent(query)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Lösche alte Straßen
+                roadsLayer.clearLayers();
+                
+                // Zeichne neue Straßen
+                data.elements.forEach(element => {
+                    if (element.type === 'way' && element.geometry) {
+                        const coords = element.geometry.map(node => [node.lat, node.lon]);
+                        const highway = element.tags.highway;
+                        
+                        // Farbe und Breite nach Straßentyp
+                        let color, weight;
+                        if (highway === 'motorway' || highway === 'motorway_link') {
+                            color = '#003d82';  // Dunkelblau - Autobahn
+                            weight = 5;
+                        } else if (highway === 'trunk' || highway === 'trunk_link') {
+                            color = '#0066cc';  // Mittelblau - Schnellstraße  
+                            weight = 4;
+                        } else if (highway === 'primary') {
+                            color = '#4d94ff';  // Hellblau - Hauptstraße
+                            weight = 3;
+                        } else {
+                            color = '#80b3ff';  // Sehr Hellblau - Nebenstraße
+                            weight = 2;
+                        }
+                        
+                        const road = L.polyline(coords, {
+                            color: color,
+                            weight: weight,
+                            opacity: 0.9,
+                            smoothFactor: 1
+                        });
+                        
+                        roadsLayer.addLayer(road);
+                    }
+                });
+                
+                console.log(`✅ ${data.elements.length} Straßen geladen`);
+                roadsLoaded = true;
+                
+            } catch (error) {
+                console.error('❌ Fehler beim Laden der Straßen:', error);
+                alert('Fehler beim Laden der Straßen. Bitte erneut versuchen.');
+            }
+        }
+        
+        // Debounce für Map-Events
+        let roadLoadTimeout;
+        function scheduleRoadLoad() {
+            if (!document.getElementById('transportToggle').checked) return;
+            
+            clearTimeout(roadLoadTimeout);
+            roadLoadTimeout = setTimeout(() => {
+                loadRoads();
+            }, 1000); // 1 Sekunde warten nach Zoom/Pan
+        }
+        
+        map.on('moveend', scheduleRoadLoad);
+        map.on('zoomend', scheduleRoadLoad);
         
         // Topo Layer
         const topoLayer = L.tileLayer.wms('https://wms.geo.admin.ch/', {
@@ -512,9 +608,22 @@
         const transportToggleInput = document.getElementById('transportToggle');
         transportToggleInput.addEventListener('change', (e) => {
             if (e.target.checked) {
-                transportLayer.addTo(map);
+                // Basis-Layer Grayscale machen
+                baseLayer.getContainer().style.filter = 'grayscale(100%)';
+                
+                // Straßen-Layer aktivieren
+                roadsLayer.addTo(map);
+                
+                // Straßen laden wenn noch nicht geladen
+                if (!roadsLoaded) {
+                    loadRoads();
+                }
             } else {
-                map.removeLayer(transportLayer);
+                // Basis-Layer zurück zu Farbe
+                baseLayer.getContainer().style.filter = 'none';
+                
+                // Straßen-Layer entfernen
+                map.removeLayer(roadsLayer);
             }
         });
 
@@ -551,8 +660,9 @@
             }
             
             customTooltip.innerHTML = text;
-            customTooltip.style.left = (x + 15) + 'px';
-            customTooltip.style.top = (y - 10) + 'px';
+            // Position direkt bei der Maus (kein Offset mehr!)
+            customTooltip.style.left = x + 'px';
+            customTooltip.style.top = y + 'px';
             customTooltip.style.display = 'block';
             currentHoverPlz = plz;
         }
@@ -564,8 +674,8 @@
         
         function updateCustomTooltip(x, y) {
             if (customTooltip.style.display === 'block') {
-                customTooltip.style.left = (x + 15) + 'px';
-                customTooltip.style.top = (y - 10) + 'px';
+                customTooltip.style.left = x + 'px';
+                customTooltip.style.top = y + 'px';
             }
         }
         

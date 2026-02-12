@@ -27,8 +27,6 @@
             color: #333;
         }
 
-
-        /* Container for the main content (TextBox + Map) */
         .container {
             display: flex;
             flex-direction: row;
@@ -44,7 +42,6 @@
             gap: 20px;
             margin-bottom: 10px;
         }
-
 
         /* --- LEFT COLUMN: CONTROLS --- */
         .controls {
@@ -100,7 +97,6 @@
             transform: translateY(1px);
         }
 
-
         /* --- RIGHT COLUMN: MAP & OVERLAY --- */
         .map-wrapper {
             flex-grow: 1;
@@ -108,7 +104,6 @@
             flex-direction: column;
             position: relative;
         }
-
 
         /* Custom Toggle Switch */
         .toggle-container {
@@ -127,11 +122,11 @@
             margin-left: 10px;
         }
 
-            .switch input {
-                opacity: 0;
-                width: 0;
-                height: 0;
-            }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
 
         .slider {
             position: absolute;
@@ -145,26 +140,25 @@
             border-radius: 34px;
         }
 
-            .slider:before {
-                position: absolute;
-                content: "";
-                height: 16px;
-                width: 16px;
-                left: 2px;
-                bottom: 2px;
-                background-color: white;
-                transition: .4s;
-                border-radius: 50%;
-            }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
 
         input:checked + .slider {
             background-color: #e9571b;
         }
 
-            input:checked + .slider:before {
-                transform: translateX(20px);
-            }
-
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
 
         /* The Map Box */
         #map {
@@ -174,7 +168,6 @@
             border-radius: 10px;
             position: relative;
         }
-
 
         /* Einwohnerzahlen Overlay Styling */
         #populationOverlay {
@@ -193,15 +186,14 @@
             transition: opacity 0.3s ease-in-out;
         }
 
-            #populationOverlay.visible {
-                display: block;
-            }
+        #populationOverlay.visible {
+            display: block;
+        }
 
-            #populationOverlay div {
-                margin-right: 20px;
-                display: inline-block;
-            }
-
+        #populationOverlay div {
+            margin-right: 20px;
+            display: inline-block;
+        }
 
         /* CSS Hack to make the specific WMS layer grayscale */
         .grayscale-layer {
@@ -222,9 +214,9 @@
             pointer-events: none !important;
         }
         
-        /* Custom Tooltip - komplett selbst gemacht! */
+        /* Custom Tooltip - fixed position */
         #customTooltip {
-            position: absolute;
+            position: fixed;  /* FIXED statt absolute! */
             background-color: rgba(51, 51, 51, 0.95);
             color: white;
             padding: 8px 12px;
@@ -244,14 +236,6 @@
 
     <h1>Lückenfinder v6</h1>
     <div class="container-top">
-
-        <div class="toggle-container">
-            <label for="transportToggle">Straßennetz</label>
-            <label class="switch">
-                <input type="checkbox" id="transportToggle">
-                <span class="slider"></span>
-            </label>
-        </div>
 
         <div class="toggle-container">
             <label for="popToggle">Population</label>
@@ -275,9 +259,9 @@
             <textarea id="plzInput" placeholder="Postleitzahlen eingeben oder auf Karte klicken..."></textarea>
             <div class="textarea-buttons">
                 <button class="textarea-btn" id="minimBtn" title="Mit/Ohne Ortschaftsnamen">Mit Name</button>
-                <button class="textarea-btn" id="copyBtn" title="Alle PLZs einzeln kopieren">Ctrl+C</button>
+                <button class="textarea-btn" id="copyBtn" title="Textfeld-Inhalt kopieren">Ctrl+C</button>
                 <button class="textarea-btn" id="sqlBtn" title="SQL-Query für Cobra CRM">SQL</button>
-                <button class="textarea-btn" id="clearBtn" title="Alles löschen">Clear</button>
+                <button class="textarea-btn" id="clearBtn" title="Alles löschen">Löschen</button>
             </div>
         </div>
 
@@ -475,130 +459,6 @@
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
         
-        // Straßen-Layer mit Overpass API
-        let roadsLayer = L.layerGroup();
-        let roadsLoaded = false;
-        let currentRoadsQuery = null;
-        
-        // Funktion um Straßen zu laden
-        async function loadRoads() {
-            // Prüfe Zoom-Level - nur ab Zoom 9 laden
-            const zoom = map.getZoom();
-            if (zoom < 9) {
-                console.log('⚠️ Zoom zu niedrig - bitte näher heranzoomen für Straßen');
-                roadsLayer.clearLayers();
-                return;
-            }
-            
-            const bounds = map.getBounds();
-            const south = Math.max(bounds.getSouth(), 45.8);
-            const north = Math.min(bounds.getNorth(), 47.9);
-            const west = Math.max(bounds.getWest(), 5.9);
-            const east = Math.min(bounds.getEast(), 10.6);
-            
-            const bbox = `${south},${west},${north},${east}`;
-            
-            // Optimierte Query - nur die wichtigsten Straßen
-            const query = `
-                [out:json][timeout:15];
-                (
-                  way["highway"="motorway"](${bbox});
-                  way["highway"="trunk"](${bbox});
-                  way["highway"="primary"](${bbox});
-                );
-                out geom;
-            `;
-            
-            try {
-                console.log('🛣️ Lade Straßen (Zoom:', zoom, ')');
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s Timeout
-                
-                const response = await fetch('https://overpass-api.de/api/interpreter', {
-                    method: 'POST',
-                    body: 'data=' + encodeURIComponent(query),
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (!response.ok) {
-                    if (response.status === 504 || response.status === 429) {
-                        throw new Error('Server überlastet - bitte in 10 Sekunden erneut versuchen');
-                    }
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                roadsLayer.clearLayers();
-                
-                data.elements.forEach(element => {
-                    if (element.type === 'way' && element.geometry) {
-                        const coords = element.geometry.map(node => [node.lat, node.lon]);
-                        const highway = element.tags.highway;
-                        
-                        let color, weight;
-                        if (highway === 'motorway' || highway === 'motorway_link') {
-                            color = '#003d82';
-                            weight = 6;
-                        } else if (highway === 'trunk' || highway === 'trunk_link') {
-                            color = '#0066cc';
-                            weight = 5;
-                        } else if (highway === 'primary') {
-                            color = '#4d94ff';
-                            weight = 4;
-                        } else {
-                            color = '#80b3ff';
-                            weight = 3;
-                        }
-                        
-                        const road = L.polyline(coords, {
-                            color: color,
-                            weight: weight,
-                            opacity: 0.9,
-                            smoothFactor: 1
-                        });
-                        
-                        roadsLayer.addLayer(road);
-                    }
-                });
-                
-                console.log(`✅ ${data.elements.length} Straßen geladen`);
-                roadsLoaded = true;
-                
-            } catch (error) {
-                console.error('❌ Fehler beim Laden der Straßen:', error);
-                
-                if (error.name === 'AbortError') {
-                    console.log('⏱️ Timeout - Anfrage dauerte zu lange');
-                } else if (error.message.includes('überlastet')) {
-                    console.log('🔄 Server überlastet - automatischer Retry in 10s');
-                    setTimeout(() => {
-                        if (document.getElementById('transportToggle').checked) {
-                            loadRoads();
-                        }
-                    }, 10000);
-                }
-            }
-        }
-        
-        // Debounce für Map-Events - länger warten
-        let roadLoadTimeout;
-        function scheduleRoadLoad() {
-            if (!document.getElementById('transportToggle').checked) return;
-            
-            clearTimeout(roadLoadTimeout);
-            roadLoadTimeout = setTimeout(() => {
-                loadRoads();
-            }, 2000); // 2 Sekunden warten
-        }
-        
-        map.on('moveend', scheduleRoadLoad);
-        map.on('zoomend', scheduleRoadLoad);
-        
-        // Topo Layer
         const topoLayer = L.tileLayer.wms('https://wms.geo.admin.ch/', {
             layers: 'ch.swisstopo-vd.ortschaftenverzeichnis_plz',
             format: 'image/png',
@@ -625,28 +485,6 @@
         // ============================================
         // 4. TOGGLE LOGIK
         // ============================================
-        
-        const transportToggleInput = document.getElementById('transportToggle');
-        transportToggleInput.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                // Basis-Layer Grayscale machen
-                baseLayer.getContainer().style.filter = 'grayscale(100%)';
-                
-                // Straßen-Layer aktivieren
-                roadsLayer.addTo(map);
-                
-                // Straßen laden wenn noch nicht geladen
-                if (!roadsLoaded) {
-                    loadRoads();
-                }
-            } else {
-                // Basis-Layer zurück zu Farbe
-                baseLayer.getContainer().style.filter = 'none';
-                
-                // Straßen-Layer entfernen
-                map.removeLayer(roadsLayer);
-            }
-        });
 
         const topoToggleInput = document.getElementById('topoToggle');
         topoToggleInput.addEventListener('change', (e) => {
@@ -673,7 +511,7 @@
         // 5. CUSTOM TOOLTIP FUNKTIONEN
         // ============================================
         
-        function showCustomTooltip(plz, x, y) {
+        function showCustomTooltip(plz, clientX, clientY) {
             let text = `<b>${plz}</b>`;
             
             if (localityNames[plz] && localityNames[plz].length > 0) {
@@ -681,9 +519,9 @@
             }
             
             customTooltip.innerHTML = text;
-            // Position direkt bei der Maus (kein Offset mehr!)
-            customTooltip.style.left = x + 'px';
-            customTooltip.style.top = y + 'px';
+            // Verwende clientX/clientY für position:fixed
+            customTooltip.style.left = clientX + 'px';
+            customTooltip.style.top = clientY + 'px';
             customTooltip.style.display = 'block';
             currentHoverPlz = plz;
         }
@@ -693,10 +531,10 @@
             currentHoverPlz = null;
         }
         
-        function updateCustomTooltip(x, y) {
+        function updateCustomTooltip(clientX, clientY) {
             if (customTooltip.style.display === 'block') {
-                customTooltip.style.left = x + 'px';
-                customTooltip.style.top = y + 'px';
+                customTooltip.style.left = clientX + 'px';
+                customTooltip.style.top = clientY + 'px';
             }
         }
         
@@ -724,13 +562,6 @@
                     fillOpacity: 0
                 };
                 
-                const selectedStyle = {
-                    color: "#e9571b",
-                    weight: 2,
-                    fillColor: "#e9571b",
-                    fillOpacity: 0.4
-                };
-                
                 features.forEach((feature, idx) => {
                     const geoJsonFeature = {
                         type: "Feature",
@@ -751,16 +582,16 @@
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
-                            // Hover Effect + Custom Tooltip
+                            // Hover Effect + Custom Tooltip mit clientX/clientY
                             layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
                                 }
-                                showCustomTooltip(feature.properties.plz, e.originalEvent.pageX, e.originalEvent.pageY);
+                                showCustomTooltip(feature.properties.plz, e.originalEvent.clientX, e.originalEvent.clientY);
                             });
                             
                             layer.on('mousemove', function(e) {
-                                updateCustomTooltip(e.originalEvent.pageX, e.originalEvent.pageY);
+                                updateCustomTooltip(e.originalEvent.clientX, e.originalEvent.clientY);
                             });
                             
                             layer.on('mouseout', function() {
@@ -979,7 +810,6 @@
             return plzList.map(plz => {
                 const plzStr = String(plz).padStart(4, '0');
                 
-                // Ortschaftsnamen OHNE Klammern!
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
                     return `${plzStr} ${localityNames[plzStr].join(', ')}`;
                 }
@@ -1010,13 +840,18 @@
             }
         });
         
+        // CTRL+C Button - Kopiert genau den Textfeld-Inhalt!
         document.getElementById('copyBtn').addEventListener('click', async () => {
-            const sortedPlzs = Array.from(selectedPlzSet).sort();
-            const plzText = sortedPlzs.map(p => String(p).padStart(4, '0')).join(', ');
+            const textContent = textBox.value;
+            
+            if (!textContent) {
+                console.log('⚠️ Textfeld ist leer');
+                return;
+            }
             
             try {
-                await navigator.clipboard.writeText(plzText);
-                console.log('📋 Kopiert:', plzText);
+                await navigator.clipboard.writeText(textContent);
+                console.log('📋 Kopiert:', textContent);
                 
                 const btn = document.getElementById('copyBtn');
                 const originalText = btn.textContent;

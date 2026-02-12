@@ -216,7 +216,7 @@
         
         /* Custom Tooltip - fixed position */
         #customTooltip {
-            position: fixed;
+            position: fixed;  /* FIXED statt absolute! */
             background-color: rgba(51, 51, 51, 0.95);
             color: white;
             padding: 8px 12px;
@@ -228,8 +228,6 @@
             z-index: 10000;
             display: none;
             white-space: nowrap;
-            transform: translate(-50%, -100%); /* Zentriert und oberhalb */
-            margin-top: -8px; /* Kleiner Abstand zum Cursor */
         }
         
     </style>
@@ -310,14 +308,12 @@
                 
                 const geojsonData = await response.json();
                 
-                geojsonData.features.forEach((feature, index) => {
+                geojsonData.features.forEach(feature => {
                     const plz = feature.properties.PLZ;
                     if (plz) {
                         if (!plzGeometries[plz]) {
                             plzGeometries[plz] = [];
                         }
-                        // Füge einen Index hinzu für spätere Zuordnung
-                        feature.featureIndex = index;
                         plzGeometries[plz].push(feature);
                     }
                 });
@@ -361,37 +357,23 @@
         function parseLocalityCSV(csvText) {
             const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
             
-            // Erste Zeile ist Header - finde die Spalten-Indizes
-            const header = lines[0].split(';');
-            const ortschaftsnameIdx = header.findIndex(col => col.trim() === 'Ortschaftsname');
-            const plzIdx = header.findIndex(col => col.trim() === 'PLZ4');
-            const zusatzzifferIdx = header.findIndex(col => col.trim() === 'Zusatzziffer');
-            
-            console.log('📋 CSV Spalten:', { ortschaftsnameIdx, plzIdx, zusatzzifferIdx });
-            
             for (let i = 1; i < lines.length; i++) {
                 const columns = lines[i].split(';');
                 
                 if (columns.length < 2) continue;
                 
-                const ortschaftsname = columns[ortschaftsnameIdx]?.trim();
-                const plz = columns[plzIdx]?.trim();
-                const zusatzziffer = zusatzzifferIdx !== -1 ? columns[zusatzzifferIdx]?.trim() : null;
+                const ortschaftsname = columns[0].trim();
+                const plz = columns[1].trim();
                 
-                if (plz && plz.length === 4 && ortschaftsname) {
+                if (plz.length === 4 && ortschaftsname) {
                     if (!localityNames[plz]) {
                         localityNames[plz] = [];
                     }
-                    
-                    // Speichere Name mit Zusatzziffer für eindeutige Zuordnung
-                    localityNames[plz].push({
-                        name: ortschaftsname,
-                        zusatzziffer: zusatzziffer
-                    });
+                    if (!localityNames[plz].includes(ortschaftsname)) {
+                        localityNames[plz].push(ortschaftsname);
+                    }
                 }
             }
-            
-            console.log('✅ Beispiel PLZ 3000:', localityNames['3000']);
         }
         
         
@@ -529,15 +511,15 @@
         // 5. CUSTOM TOOLTIP FUNKTIONEN
         // ============================================
         
-        function showCustomTooltip(plz, regionName, clientX, clientY) {
+        function showCustomTooltip(plz, clientX, clientY) {
             let text = `<b>${plz}</b>`;
             
-            // Zeige nur den Namen DIESER spezifischen Region
-            if (regionName) {
-                text += `<br>${regionName}`;
+            if (localityNames[plz] && localityNames[plz].length > 0) {
+                text += `<br>${localityNames[plz].join(', ')}`;
             }
             
             customTooltip.innerHTML = text;
+            // Verwende clientX/clientY für position:fixed
             customTooltip.style.left = clientX + 'px';
             customTooltip.style.top = clientY + 'px';
             customTooltip.style.display = 'block';
@@ -593,39 +575,6 @@
                     const layer = L.geoJSON(geoJsonFeature, {
                         style: normalStyle,
                         onEachFeature: function (feature, layer) {
-                            const plz = feature.properties.plz;
-                            
-                            // Versuche Zusatzziffer aus GeoJSON zu holen
-                            // Mögliche Feldnamen je nach Shapefile-Quelle
-                            const zusatzziffer = feature.properties.ZUSATZZIFFER || 
-                                                feature.properties.Zusatzziffer || 
-                                                feature.properties.zusatzziffer ||
-                                                feature.properties.ONRP ||
-                                                null;
-                            
-                            let regionName = null;
-                            
-                            // 1. Versuch: Match über Zusatzziffer
-                            if (zusatzziffer && localityNames[plz]) {
-                                const match = localityNames[plz].find(entry => 
-                                    entry.zusatzziffer === String(zusatzziffer)
-                                );
-                                if (match) {
-                                    regionName = match.name;
-                                    console.log(`✓ Match via Zusatzziffer: ${plz}-${zusatzziffer} → ${regionName}`);
-                                }
-                            }
-                            
-                            // 2. Fallback: Name aus GeoJSON
-                            if (!regionName) {
-                                regionName = feature.properties.name;
-                            }
-                            
-                            // 3. Fallback: Erster Name aus CSV
-                            if (!regionName && localityNames[plz] && localityNames[plz].length > 0) {
-                                regionName = localityNames[plz][0].name;
-                            }
-                            
                             // Click Handler
                             layer.on('click', function(e) {
                                 L.DomEvent.stopPropagation(e);
@@ -633,12 +582,12 @@
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
-                            // Hover Effect + Custom Tooltip
+                            // Hover Effect + Custom Tooltip mit clientX/clientY
                             layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
                                 }
-                                showCustomTooltip(feature.properties.plz, regionName, e.originalEvent.clientX, e.originalEvent.clientY);
+                                showCustomTooltip(feature.properties.plz, e.originalEvent.clientX, e.originalEvent.clientY);
                             });
                             
                             layer.on('mousemove', function(e) {
@@ -862,9 +811,7 @@
                 const plzStr = String(plz).padStart(4, '0');
                 
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
-                    // Sammle alle Namen (ohne Duplikate)
-                    const names = [...new Set(localityNames[plzStr].map(entry => entry.name))];
-                    return `${plzStr} ${names.join(', ')}`;
+                    return `${plzStr} ${localityNames[plzStr].join(', ')}`;
                 }
                 
                 return plzStr;

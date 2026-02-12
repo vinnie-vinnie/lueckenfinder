@@ -361,23 +361,37 @@
         function parseLocalityCSV(csvText) {
             const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
             
+            // Erste Zeile ist Header - finde die Spalten-Indizes
+            const header = lines[0].split(';');
+            const ortschaftsnameIdx = header.findIndex(col => col.trim() === 'Ortschaftsname');
+            const plzIdx = header.findIndex(col => col.trim() === 'PLZ4');
+            const zusatzzifferIdx = header.findIndex(col => col.trim() === 'Zusatzziffer');
+            
+            console.log('📋 CSV Spalten:', { ortschaftsnameIdx, plzIdx, zusatzzifferIdx });
+            
             for (let i = 1; i < lines.length; i++) {
                 const columns = lines[i].split(';');
                 
                 if (columns.length < 2) continue;
                 
-                const ortschaftsname = columns[0].trim();
-                const plz = columns[1].trim();
+                const ortschaftsname = columns[ortschaftsnameIdx]?.trim();
+                const plz = columns[plzIdx]?.trim();
+                const zusatzziffer = zusatzzifferIdx !== -1 ? columns[zusatzzifferIdx]?.trim() : null;
                 
-                if (plz.length === 4 && ortschaftsname) {
+                if (plz && plz.length === 4 && ortschaftsname) {
                     if (!localityNames[plz]) {
                         localityNames[plz] = [];
                     }
-                    if (!localityNames[plz].includes(ortschaftsname)) {
-                        localityNames[plz].push(ortschaftsname);
-                    }
+                    
+                    // Speichere Name mit Zusatzziffer für eindeutige Zuordnung
+                    localityNames[plz].push({
+                        name: ortschaftsname,
+                        zusatzziffer: zusatzziffer
+                    });
                 }
             }
+            
+            console.log('✅ Beispiel PLZ 3000:', localityNames['3000']);
         }
         
         
@@ -581,15 +595,35 @@
                         onEachFeature: function (feature, layer) {
                             const plz = feature.properties.plz;
                             
-                            // Hol den Namen aus dem GeoJSON Feature properties
-                            let regionName = feature.properties.name;
+                            // Versuche Zusatzziffer aus GeoJSON zu holen
+                            // Mögliche Feldnamen je nach Shapefile-Quelle
+                            const zusatzziffer = feature.properties.ZUSATZZIFFER || 
+                                                feature.properties.Zusatzziffer || 
+                                                feature.properties.zusatzziffer ||
+                                                feature.properties.ONRP ||
+                                                null;
                             
-                            // Falls kein Name im GeoJSON, nutze den ersten aus CSV
+                            let regionName = null;
+                            
+                            // 1. Versuch: Match über Zusatzziffer
+                            if (zusatzziffer && localityNames[plz]) {
+                                const match = localityNames[plz].find(entry => 
+                                    entry.zusatzziffer === String(zusatzziffer)
+                                );
+                                if (match) {
+                                    regionName = match.name;
+                                    console.log(`✓ Match via Zusatzziffer: ${plz}-${zusatzziffer} → ${regionName}`);
+                                }
+                            }
+                            
+                            // 2. Fallback: Name aus GeoJSON
+                            if (!regionName) {
+                                regionName = feature.properties.name;
+                            }
+                            
+                            // 3. Fallback: Erster Name aus CSV
                             if (!regionName && localityNames[plz] && localityNames[plz].length > 0) {
-                                // Bei mehreren Ortschaften für diese PLZ, nimm den idx-ten Namen
-                                // oder den ersten wenn nur einer vorhanden
-                                const nameIndex = Math.min(idx, localityNames[plz].length - 1);
-                                regionName = localityNames[plz][nameIndex];
+                                regionName = localityNames[plz][0].name;
                             }
                             
                             // Click Handler
@@ -599,7 +633,7 @@
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
-                            // Hover Effect + Custom Tooltip mit regionalem Namen
+                            // Hover Effect + Custom Tooltip
                             layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
@@ -828,7 +862,9 @@
                 const plzStr = String(plz).padStart(4, '0');
                 
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
-                    return `${plzStr} ${localityNames[plzStr].join(', ')}`;
+                    // Sammle alle Namen (ohne Duplikate)
+                    const names = [...new Set(localityNames[plzStr].map(entry => entry.name))];
+                    return `${plzStr} ${names.join(', ')}`;
                 }
                 
                 return plzStr;

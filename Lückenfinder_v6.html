@@ -216,7 +216,7 @@
         
         /* Custom Tooltip - fixed position */
         #customTooltip {
-            position: fixed;  /* FIXED statt absolute! */
+            position: fixed;
             background-color: rgba(51, 51, 51, 0.95);
             color: white;
             padding: 8px 12px;
@@ -228,6 +228,8 @@
             z-index: 10000;
             display: none;
             white-space: nowrap;
+            transform: translate(-50%, -100%); /* Zentriert und oberhalb */
+            margin-top: -8px; /* Kleiner Abstand zum Cursor */
         }
         
     </style>
@@ -511,15 +513,15 @@
         // 5. CUSTOM TOOLTIP FUNKTIONEN
         // ============================================
         
-        function showCustomTooltip(plz, clientX, clientY) {
+        function showCustomTooltip(plz, regionName, clientX, clientY) {
             let text = `<b>${plz}</b>`;
             
-            if (localityNames[plz] && localityNames[plz].length > 0) {
-                text += `<br>${localityNames[plz].join(', ')}`;
+            // Zeige nur den Namen DIESER spezifischen Region
+            if (regionName) {
+                text += `<br>${regionName}`;
             }
             
             customTooltip.innerHTML = text;
-            // Verwende clientX/clientY für position:fixed
             customTooltip.style.left = clientX + 'px';
             customTooltip.style.top = clientY + 'px';
             customTooltip.style.display = 'block';
@@ -575,6 +577,9 @@
                     const layer = L.geoJSON(geoJsonFeature, {
                         style: normalStyle,
                         onEachFeature: function (feature, layer) {
+                            // Hol den Namen DIESER spezifischen Region aus dem GeoJSON
+                            const regionName = feature.properties.name || '';
+                            
                             // Click Handler
                             layer.on('click', function(e) {
                                 L.DomEvent.stopPropagation(e);
@@ -582,12 +587,12 @@
                                 togglePlzSelection(feature.properties.plz);
                             });
                             
-                            // Hover Effect + Custom Tooltip mit clientX/clientY
+                            // Hover Effect + Custom Tooltip mit regionalem Namen
                             layer.on('mouseover', function(e) {
                                 if (!selectedPlzSet.has(feature.properties.plz)) {
                                     layer.setStyle({fillOpacity: 0.2, fillColor: "#e9571b"});
                                 }
-                                showCustomTooltip(feature.properties.plz, e.originalEvent.clientX, e.originalEvent.clientY);
+                                showCustomTooltip(feature.properties.plz, regionName, e.originalEvent.clientX, e.originalEvent.clientY);
                             });
                             
                             layer.on('mousemove', function(e) {

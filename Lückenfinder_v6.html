@@ -216,7 +216,7 @@
         
         /* Custom Tooltip - fixed position */
         #customTooltip {
-            position: fixed;  /* FIXED statt absolute! */
+            position: fixed;
             background-color: rgba(51, 51, 51, 0.95);
             color: white;
             padding: 8px 12px;
@@ -228,8 +228,10 @@
             z-index: 10000;
             display: none;
             white-space: nowrap;
+            transform: translate(-50%, -100%); /* Zentriert und oberhalb */
+            margin-top: -8px; /* Kleiner Abstand zum Cursor */
         }
-        
+
     </style>
 </head>
 <body>

@@ -216,7 +216,7 @@
         
         /* Custom Tooltip - fixed position */
         #customTooltip {
-            position: fixed;
+            position: fixed;  /* FIXED statt absolute! */
             background-color: rgba(51, 51, 51, 0.95);
             color: white;
             padding: 8px 12px;
@@ -228,10 +228,8 @@
             z-index: 10000;
             display: none;
             white-space: nowrap;
-            transform: translate(-50%, -100%); /* Zentriert und oberhalb */
-            margin-top: -8px; /* Kleiner Abstand zum Cursor */
         }
-
+        
     </style>
 </head>
 <body>
@@ -647,7 +645,7 @@
         
         function updateTextFieldFromSelection() {
             const sortedPlzs = Array.from(selectedPlzSet).sort();
-            const plzString = formatPlzListToRanges(sortedPlzs);
+            const plzString = formatPlzListSimple(sortedPlzs);
             textBox.value = plzString;
         }
         
@@ -771,53 +769,40 @@
         // 8. FORMAT-FUNKTIONEN
         // ============================================
         
-        function formatPlzListToRanges(plzList) {
+        function formatPlzListSimple(plzList) {
             if (plzList.length === 0) return '';
             
-            const numbers = plzList.map(p => parseInt(p)).sort((a, b) => a - b);
-            const ranges = [];
-            let rangeStart = numbers[0];
-            let rangeEnd = numbers[0];
-            
-            for (let i = 1; i < numbers.length; i++) {
-                if (numbers[i] === rangeEnd + 1) {
-                    rangeEnd = numbers[i];
-                } else {
-                    if (rangeStart === rangeEnd) {
-                        ranges.push(String(rangeStart).padStart(4, '0'));
-                    } else if (rangeEnd === rangeStart + 1) {
-                        ranges.push(String(rangeStart).padStart(4, '0'));
-                        ranges.push(String(rangeEnd).padStart(4, '0'));
-                    } else {
-                        ranges.push(`${String(rangeStart).padStart(4, '0')}-${String(rangeEnd).padStart(4, '0')}`);
-                    }
-                    rangeStart = numbers[i];
-                    rangeEnd = numbers[i];
-                }
-            }
-            
-            if (rangeStart === rangeEnd) {
-                ranges.push(String(rangeStart).padStart(4, '0'));
-            } else if (rangeEnd === rangeStart + 1) {
-                ranges.push(String(rangeStart).padStart(4, '0'));
-                ranges.push(String(rangeEnd).padStart(4, '0'));
-            } else {
-                ranges.push(`${String(rangeStart).padStart(4, '0')}-${String(rangeEnd).padStart(4, '0')}`);
-            }
-            
-            return ranges.join(', ');
+            // Einfach sortiert und mit Komma getrennt - keine Ranges mehr!
+            return plzList
+                .map(p => String(p).padStart(4, '0'))
+                .sort()
+                .join(', ');
         }
         
         function formatPlzListExpanded(plzList) {
-            return plzList.map(plz => {
+            const result = [];
+            
+            plzList.sort().forEach(plz => {
                 const plzStr = String(plz).padStart(4, '0');
                 
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
-                    return `${plzStr} ${localityNames[plzStr].join(', ')}`;
+                    const names = [...new Set(localityNames[plzStr].map(entry => entry.name))];
+                    
+                    // Wenn mehrere Ortschaften für diese PLZ: Zeige PLZ für jede
+                    if (names.length > 1) {
+                        names.forEach(name => {
+                            result.push(`${plzStr} ${name}`);
+                        });
+                    } else {
+                        // Nur eine Ortschaft: Wie bisher
+                        result.push(`${plzStr} ${names[0]}`);
+                    }
+                } else {
+                    result.push(plzStr);
                 }
-                
-                return plzStr;
-            }).sort().join(', ');
+            });
+            
+            return result.join(', ');
         }
         
         
@@ -835,10 +820,10 @@
                 minimBtn.textContent = 'Ohne Name';
                 console.log('📋 Format: Expandiert mit Namen');
             } else {
-                textBox.value = formatPlzListToRanges(sortedPlzs);
+                textBox.value = formatPlzListSimple(sortedPlzs);
                 isMinimized = true;
                 minimBtn.textContent = 'Mit Name';
-                console.log('📋 Format: Minimiert ohne Namen');
+                console.log('📋 Format: Nur PLZs ohne Namen');
             }
         });
         

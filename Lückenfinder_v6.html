@@ -786,7 +786,7 @@
                 const plzStr = String(plz).padStart(4, '0');
                 
                 if (localityNames[plzStr] && localityNames[plzStr].length > 0) {
-                    const names = [...new Set(localityNames[plzStr].map(entry => entry.name))];
+                    const names = localityNames[plzStr]; // Bereits ein Array von Strings
                     
                     // Wenn mehrere Ortschaften für diese PLZ: Zeige PLZ für jede
                     if (names.length > 1) {

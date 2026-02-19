@@ -647,6 +647,10 @@
             const sortedPlzs = Array.from(selectedPlzSet).sort();
             const plzString = formatPlzListSimple(sortedPlzs);
             textBox.value = plzString;
+            
+            // Sync Button-Status: Wenn wir simple Format setzen, ist es "minimiert"
+            isMinimized = true;
+            minimBtn.textContent = 'Mit Name';
         }
         
         function updatePopulationFromSelection() {

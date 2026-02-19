@@ -26,12 +26,12 @@
             font-size: 2.5rem;
             color: #333;
         }
-        
-        p {
+
+	p {
             margin: 0 0 0 0;
             text-align: left;
             font-weight: normal;
-            font-size: 0.8rem;
+            font-size: 0.7rem;
             color: #333;
         }
 
@@ -244,7 +244,7 @@
 </head>
 <body>
 
-    <h1>Lückenfinder v6</h1><p>von Vincent & Claude</p>
+    <h1>Lückenfinder v6.1</h1><p>von Vincent & Claude</p>
     <div class="container-top">
 
         <div class="toggle-container">
@@ -297,6 +297,11 @@
         let selectedPlzSet = new Set();
         let interactiveLayers = {};
         let isMinimized = true;
+        
+        // Undo/Redo History
+        let history = [];
+        let historyIndex = -1;
+        let isRestoringState = false; // Flag um zu verhindern dass Undo/Redo sich selbst triggered
         
         // Custom Tooltip
         const customTooltip = document.getElementById('customTooltip');
@@ -518,6 +523,195 @@
 
         
         // ============================================
+        // 4a. UNDO/REDO SYSTEM
+        // ============================================
+        
+        function saveToHistory() {
+            if (isRestoringState) return; // Verhindere dass Undo/Redo sich selbst speichert
+            
+            // Schneide History ab wenn wir nicht am Ende sind
+            if (historyIndex < history.length - 1) {
+                history = history.slice(0, historyIndex + 1);
+            }
+            
+            // Speichere aktuellen Zustand
+            const state = {
+                plzs: Array.from(selectedPlzSet),
+                isMinimized: isMinimized
+            };
+            
+            history.push(state);
+            historyIndex++;
+            
+            // Limitiere History auf 50 Schritte
+            if (history.length > 50) {
+                history.shift();
+                historyIndex--;
+            }
+            
+            console.log(`💾 State gespeichert (${historyIndex + 1}/${history.length})`);
+        }
+        
+        function undo() {
+            if (historyIndex <= 0) {
+                console.log('⚠️ Nichts zum Rückgängig machen');
+                return;
+            }
+            
+            historyIndex--;
+            restoreState(history[historyIndex]);
+            console.log(`↶ Undo (${historyIndex + 1}/${history.length})`);
+        }
+        
+        function redo() {
+            if (historyIndex >= history.length - 1) {
+                console.log('⚠️ Nichts zum Wiederherstellen');
+                return;
+            }
+            
+            historyIndex++;
+            restoreState(history[historyIndex]);
+            console.log(`↷ Redo (${historyIndex + 1}/${history.length})`);
+        }
+        
+        function restoreState(state) {
+            isRestoringState = true;
+            
+            // Setze Auswahl zurück
+            selectedPlzSet.clear();
+            state.plzs.forEach(plz => selectedPlzSet.add(plz));
+            
+            // Update Karte
+            Object.keys(interactiveLayers).forEach(plz => {
+                const layers = interactiveLayers[plz];
+                
+                if (selectedPlzSet.has(plz)) {
+                    layers.forEach(layer => {
+                        layer.setStyle({
+                            fillOpacity: 0.4,
+                            fillColor: "#e9571b",
+                            color: "#e9571b",
+                            weight: 2
+                        });
+                    });
+                } else {
+                    layers.forEach(layer => {
+                        layer.setStyle({
+                            fillOpacity: 0,
+                            fillColor: "#fff",
+                            color: "#333",
+                            weight: 1
+                        });
+                    });
+                }
+            });
+            
+            // Update Textfeld
+            isMinimized = state.isMinimized;
+            const sortedPlzs = Array.from(selectedPlzSet).sort();
+            if (isMinimized) {
+                textBox.value = formatPlzListSimple(sortedPlzs);
+                minimBtn.textContent = 'Mit Name';
+            } else {
+                textBox.value = formatPlzListExpanded(sortedPlzs);
+                minimBtn.textContent = 'Ohne Name';
+            }
+            
+            // Update Population
+            updatePopulationFromSelection();
+            
+            // Update URL
+            updateURL();
+            
+            isRestoringState = false;
+        }
+        
+        
+        // ============================================
+        // 4b. URL SHARING
+        // ============================================
+        
+        function updateURL() {
+            if (selectedPlzSet.size === 0) {
+                // Keine Auswahl → Clean URL
+                window.history.replaceState(null, '', window.location.pathname);
+                return;
+            }
+            
+            const plzs = Array.from(selectedPlzSet).sort().join(',');
+            const params = new URLSearchParams();
+            params.set('plz', plzs);
+            
+            // Update URL ohne Page Reload
+            window.history.replaceState(null, '', '?' + params.toString());
+            console.log('🔗 URL aktualisiert');
+        }
+        
+        function loadFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            const plzParam = params.get('plz');
+            
+            if (!plzParam) return;
+            
+            console.log('🔗 Lade Auswahl aus URL:', plzParam);
+            
+            const plzs = plzParam.split(',').map(p => p.trim()).filter(p => p.length === 4);
+            
+            if (plzs.length > 0) {
+                // Setze Auswahl
+                selectedPlzSet.clear();
+                plzs.forEach(plz => selectedPlzSet.add(plz));
+                
+                // Update Karte (muss warten bis Geometrien geladen sind)
+                if (geometriesLoaded) {
+                    applySelectionToMap();
+                } else {
+                    // Warte auf Geometrien
+                    const checkInterval = setInterval(() => {
+                        if (geometriesLoaded) {
+                            clearInterval(checkInterval);
+                            applySelectionToMap();
+                        }
+                    }, 100);
+                }
+            }
+        }
+        
+        function applySelectionToMap() {
+            // Highlight auf Karte
+            Object.keys(interactiveLayers).forEach(plz => {
+                const layers = interactiveLayers[plz];
+                
+                if (selectedPlzSet.has(plz)) {
+                    layers.forEach(layer => {
+                        layer.setStyle({
+                            fillOpacity: 0.4,
+                            fillColor: "#e9571b",
+                            color: "#e9571b",
+                            weight: 2
+                        });
+                    });
+                }
+            });
+            
+            // Update Textfeld
+            const sortedPlzs = Array.from(selectedPlzSet).sort();
+            textBox.value = formatPlzListSimple(sortedPlzs);
+            
+            // Update Population
+            updatePopulationFromSelection();
+            
+            // Speichere in History
+            saveToHistory();
+            
+            console.log(`✅ ${selectedPlzSet.size} PLZs aus URL geladen`);
+        }
+        
+        // Lade beim Start
+        window.addEventListener('load', loadFromURL);
+
+        
+        // ============================================
         // 5. CUSTOM TOOLTIP FUNKTIONEN
         // ============================================
         
@@ -651,6 +845,10 @@
             
             updateTextFieldFromSelection();
             updatePopulationFromSelection();
+            
+            // Speichere in History & Update URL
+            saveToHistory();
+            updateURL();
         }
         
         function updateTextFieldFromSelection() {
@@ -738,6 +936,10 @@
             });
             
             updatePopulationFromSelection();
+            
+            // Speichere in History & Update URL
+            saveToHistory();
+            updateURL();
         }
         
         function parsePlzInput(text) {
@@ -839,6 +1041,9 @@
                 minimBtn.textContent = 'Mit Name';
                 console.log('📋 Format: Nur PLZs ohne Namen');
             }
+            
+            // Speichere Format-Änderung in History
+            saveToHistory();
         });
         
         // CTRL+C Button - Kopiert genau den Textfeld-Inhalt!
@@ -929,6 +1134,10 @@
             minimBtn.textContent = 'Mit Name';
             isMinimized = true;
             
+            // Speichere Löschen in History & Update URL
+            saveToHistory();
+            updateURL();
+            
             console.log('🗑️ Alle Auswahlen gelöscht');
         });
         
@@ -938,9 +1147,23 @@
         // ============================================
 
         document.addEventListener('keydown', function (event) {
+            // Ctrl/Cmd + Enter für Namen Toggle
             if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
                 document.getElementById('minimBtn').click();
+            }
+            
+            // Ctrl/Cmd + Z für Undo
+            if (event.key === 'z' && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+                event.preventDefault();
+                undo();
+            }
+            
+            // Ctrl/Cmd + Y oder Ctrl/Cmd + Shift + Z für Redo
+            if ((event.key === 'y' && (event.ctrlKey || event.metaKey)) || 
+                (event.key === 'z' && (event.ctrlKey || event.metaKey) && event.shiftKey)) {
+                event.preventDefault();
+                redo();
             }
         });
     </script>
